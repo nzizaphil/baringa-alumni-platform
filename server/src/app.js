@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 
 import healthRoutes from './routes/health.routes.js';
+import authRoutes from './routes/auth.routes.js';
 import { notFoundHandler, errorHandler } from './middleware/error.middleware.js';
 
 /**
@@ -51,6 +52,7 @@ app.use(
 );
 
 app.use('/api/health', healthRoutes);
+app.use('/api/auth', authRoutes);
 
 // Anything under /api that reached this point matched no route.
 app.use('/api', notFoundHandler);
