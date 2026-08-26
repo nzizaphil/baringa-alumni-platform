@@ -6,6 +6,7 @@ import { ApiError } from '../api/client.js';
 import Alert from '../components/Alert.jsx';
 import Button from '../components/Button.jsx';
 import FormField from '../components/FormField.jsx';
+import PageLayout from '../components/PageLayout.jsx';
 import RadioGroup from '../components/RadioGroup.jsx';
 import {
   buildPayload,
@@ -14,34 +15,26 @@ import {
   EMPTY_VALUES,
   FIELD_ORDER,
   mapServerErrors,
-  MIN_PASSWORD_LENGTH,
   requiresGraduationYear,
   requiresStudentNumber,
   validate,
 } from '../validation/register.js';
 
+/*
+ * The prototype's radio `value` attributes are placeholders (student,
+ * graduate, lecturer_current, lecturer_former) and are not what the API
+ * accepts. The values below come from ASSOCIATIONS in the server's User model,
+ * which is the only correct source; only the labels are taken from the
+ * prototype.
+ */
 const ASSOCIATION_OPTIONS = [
-  {
-    value: ASSOCIATION_TYPES.CURRENT_STUDENT,
-    label: 'Current student',
-    description: 'Enrolled at Baringa University right now',
-  },
-  {
-    value: ASSOCIATION_TYPES.FORMER_STUDENT,
-    label: 'Former student',
-    description: 'Graduated from or previously studied at Baringa',
-  },
-  {
-    value: ASSOCIATION_TYPES.CURRENT_LECTURER,
-    label: 'Current lecturer',
-    description: 'Teaching at Baringa University right now',
-  },
-  {
-    value: ASSOCIATION_TYPES.FORMER_LECTURER,
-    label: 'Former lecturer',
-    description: 'Previously taught at Baringa University',
-  },
+  { value: ASSOCIATION_TYPES.CURRENT_STUDENT, label: 'Current student' },
+  { value: ASSOCIATION_TYPES.FORMER_STUDENT, label: 'Former student / graduate' },
+  { value: ASSOCIATION_TYPES.CURRENT_LECTURER, label: 'Current lecturer' },
+  { value: ASSOCIATION_TYPES.FORMER_LECTURER, label: 'Former lecturer' },
 ];
+
+const PASSWORD_HELPER = 'At least 8 characters, including a letter and a number';
 
 export default function RegisterPage() {
   const [values, setValues] = useState(EMPTY_VALUES);
@@ -53,13 +46,16 @@ export default function RegisterPage() {
   const fieldRefs = useRef({});
   const isSubmitting = status === 'submitting';
 
-  const showStudentNumber = requiresStudentNumber(values.associationType);
-  const showGraduationYear = requiresGraduationYear(values.associationType);
+  /*
+   * Both conditional fields stay mounted at all times; the association decides
+   * only whether they are enabled. A disabled field is greyed, excluded from
+   * validation and left out of the request body.
+   */
+  const studentNumberEnabled = requiresStudentNumber(values.associationType);
+  const graduationYearEnabled = requiresGraduationYear(values.associationType);
 
   const registerRef = useCallback(
     (field) => (element) => {
-      // A callback ref is also called with null on unmount, which keeps the
-      // conditional fields from leaving a stale node behind.
       fieldRefs.current[field] = element;
     },
     []
@@ -71,7 +67,8 @@ export default function RegisterPage() {
     if (!firstInvalid) return;
 
     const element = fieldRefs.current[firstInvalid];
-    if (!element) return;
+    // A disabled control cannot take focus, so skip it rather than trapping.
+    if (!element || element.disabled) return;
 
     element.focus();
     element.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
@@ -83,8 +80,8 @@ export default function RegisterPage() {
     setValues((previous) => {
       const next = { ...previous, [name]: value };
 
-      // Switching association hides fields; their values must not be
-      // submitted, and their stale errors must not block the next submit.
+      // Switching association can disable a field; anything already typed
+      // there is cleared so it cannot reach the request body.
       if (name === 'associationType') {
         if (!requiresStudentNumber(value)) next.studentNumber = '';
         if (!requiresGraduationYear(value)) next.graduationYear = '';
@@ -172,12 +169,21 @@ export default function RegisterPage() {
 
   if (status === 'success') {
     return (
-      <main className="page">
-        <section className="card card--narrow" aria-labelledby="registration-complete">
-          <Alert variant="success" title="Registration received">
+      <PageLayout>
+        <section
+          className="w-full max-w-[600px] rounded-card border border-border-light bg-white p-8 shadow-sm md:p-10"
+          aria-labelledby="registration-complete"
+        >
+          <h1 id="registration-complete" className="mb-2 text-32 font-semibold text-near-black">
+            Registration received
+          </h1>
+          <p className="mb-8 text-16 text-secondary-text">
+            Your registration is reviewed by an administrator before you can post.
+          </p>
+
+          <Alert variant="success" title="Pending administrator approval">
             <p>
-              Thanks for registering. Your application is <strong>pending administrator
-              approval</strong> — an administrator will review your association with Baringa
+              Thanks for registering. An administrator will review your association with Baringa
               University before your account is activated.
             </p>
             <p>
@@ -186,43 +192,47 @@ export default function RegisterPage() {
             </p>
           </Alert>
 
-          <h1 id="registration-complete" className="visually-hidden">
-            Registration complete
-          </h1>
-
-          <p className="card__footnote">
-            Already approved? <Link to="/login">Sign in to your account</Link>
-          </p>
+          <div className="mt-8 text-center">
+            <Link
+              to="/login"
+              className="text-14 font-semibold text-primary-text decoration-2 underline-offset-4 hover:underline"
+            >
+              Already approved? Sign in
+            </Link>
+          </div>
         </section>
-      </main>
+      </PageLayout>
     );
   }
 
   return (
-    <main className="page">
-      <section className="card" aria-labelledby="register-heading">
-        <header className="card__header">
-          <p className="card__eyebrow">Baringa University Alumni Platform</p>
-          <h1 id="register-heading" className="card__title">
+    <PageLayout>
+      <section
+        id="register-card"
+        className="w-full max-w-[600px] rounded-card border border-border-light bg-white p-8 shadow-sm md:p-10"
+        aria-labelledby="register-heading"
+      >
+        <div className="mb-8">
+          <h1 id="register-heading" className="mb-2 text-32 font-semibold text-near-black">
             Create your account
           </h1>
-          <p className="card__subtitle">
-            Tell us how you are associated with Baringa University. An administrator reviews every
-            application before the account is activated.
+          <p className="text-16 text-secondary-text">
+            Your registration is reviewed by an administrator before you can post.
           </p>
-        </header>
+        </div>
 
         {formError && (
-          <Alert variant="error" title="We could not complete your registration">
-            <p>{formError}</p>
-          </Alert>
+          <div className="mb-6">
+            <Alert variant="error" title={formError} />
+          </div>
         )}
 
-        <form className="form" onSubmit={handleSubmit} noValidate>
+        <form className="space-y-6" onSubmit={handleSubmit} noValidate>
           <FormField
             id="name"
             name="name"
             label="Full name"
+            placeholder="Jane Doe"
             autoComplete="name"
             value={values.name}
             onChange={handleChange}
@@ -236,9 +246,9 @@ export default function RegisterPage() {
             id="email"
             name="email"
             type="email"
-            label="Email address"
+            label="Email"
+            placeholder="jane@example.com"
             autoComplete="email"
-            helperText="Use the address you want approval notices sent to."
             value={values.email}
             onChange={handleChange}
             error={errors.email}
@@ -252,8 +262,9 @@ export default function RegisterPage() {
             name="password"
             type="password"
             label="Password"
+            placeholder="••••••••"
             autoComplete="new-password"
-            helperText={`At least ${MIN_PASSWORD_LENGTH} characters, including a letter and a number.`}
+            helperText={PASSWORD_HELPER}
             value={values.password}
             onChange={handleChange}
             error={errors.password}
@@ -265,7 +276,7 @@ export default function RegisterPage() {
           <RadioGroup
             id="associationType"
             name="associationType"
-            legend="Your association with the university"
+            legend="I am a"
             options={ASSOCIATION_OPTIONS}
             value={values.associationType}
             onChange={handleChange}
@@ -274,50 +285,65 @@ export default function RegisterPage() {
             inputRef={registerRef('associationType')}
           />
 
-          {showStudentNumber && (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <FormField
               id="studentNumber"
               name="studentNumber"
               label="Student number"
+              placeholder="12345678"
               inputMode="numeric"
               autoComplete="off"
-              helperText="The number on your student ID, for example 09876543."
+              helperText={
+                studentNumberEnabled
+                  ? 'The number on your student ID'
+                  : 'Only applies to current and former students'
+              }
               value={values.studentNumber}
               onChange={handleChange}
               error={errors.studentNumber}
-              required
+              required={studentNumberEnabled}
+              disabled={!studentNumberEnabled || isSubmitting}
               inputRef={registerRef('studentNumber')}
-              disabled={isSubmitting}
             />
-          )}
 
-          {showGraduationYear && (
             <FormField
               id="graduationYear"
               name="graduationYear"
               label="Graduation year"
+              placeholder="YYYY"
               inputMode="numeric"
               maxLength={4}
               autoComplete="off"
-              helperText={`The year you completed your studies, between ${EARLIEST_GRADUATION_YEAR} and ${CURRENT_YEAR}.`}
+              helperText={
+                graduationYearEnabled
+                  ? `Between ${EARLIEST_GRADUATION_YEAR} and ${CURRENT_YEAR}`
+                  : 'Only applies to former students'
+              }
               value={values.graduationYear}
               onChange={handleChange}
               error={errors.graduationYear}
-              required
+              required={graduationYearEnabled}
+              disabled={!graduationYearEnabled || isSubmitting}
               inputRef={registerRef('graduationYear')}
-              disabled={isSubmitting}
             />
-          )}
+          </div>
 
-          <Button type="submit" variant="primary" fullWidth loading={isSubmitting}>
-            {isSubmitting ? 'Creating your account…' : 'Create account'}
-          </Button>
+          <div className="pt-2">
+            <Button type="submit" variant="primary" fullWidth loading={isSubmitting}>
+              {isSubmitting ? 'Creating your account…' : 'Create account'}
+            </Button>
+
+            <div className="mt-4 text-center">
+              <Link
+                to="/login"
+                className="text-14 font-semibold text-primary-text decoration-2 underline-offset-4 hover:underline"
+              >
+                Already have an account? Sign in
+              </Link>
+            </div>
+          </div>
         </form>
-
-        <p className="card__footnote">
-          Already have an account? <Link to="/login">Sign in</Link>
-        </p>
       </section>
-    </main>
+    </PageLayout>
   );
 }

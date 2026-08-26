@@ -1,30 +1,38 @@
 import { Link } from 'react-router-dom';
 
+import PageLayout from '../components/PageLayout.jsx';
+
 /**
  * Placeholder for the sign-in screen.
  *
  * Login, session handling and every authenticated screen belong to later
  * tickets; this exists only so the "Sign in" links on the registration screen
- * resolve to a real route.
+ * resolve to a real route. It borrows the shared layout and tokens so it is
+ * not left unstyled, but the F05 screens are not built here.
  */
 export default function LoginPage() {
   return (
-    <main className="page">
-      <section className="card card--narrow" aria-labelledby="login-heading">
-        <header className="card__header">
-          <p className="card__eyebrow">Baringa University Alumni Platform</p>
-          <h1 id="login-heading" className="card__title">
-            Sign in
-          </h1>
-          <p className="card__subtitle">
-            Signing in is not available yet — it arrives in a later release.
-          </p>
-        </header>
-
-        <p className="card__footnote">
-          Need an account? <Link to="/register">Register as a member</Link>
+    <PageLayout>
+      <section
+        className="w-full max-w-[450px] rounded-card border border-border-light bg-white p-8 shadow-sm md:p-10"
+        aria-labelledby="login-heading"
+      >
+        <h1 id="login-heading" className="mb-2 text-32 font-semibold text-near-black">
+          Sign in
+        </h1>
+        <p className="text-16 text-secondary-text">
+          Signing in is not available yet — it arrives in a later release.
         </p>
+
+        <div className="mt-8 text-center">
+          <Link
+            to="/register"
+            className="text-14 font-semibold text-primary-text decoration-2 underline-offset-4 hover:underline"
+          >
+            Need an account? Register as a member
+          </Link>
+        </div>
       </section>
-    </main>
+    </PageLayout>
   );
 }
