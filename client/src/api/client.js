@@ -11,6 +11,8 @@
  * and the field-level `errors` array on failure.
  */
 
+import { readToken } from '../auth/tokenStorage.js';
+
 /** Base URL every request is prefixed with. Falls back to the Vite dev proxy. */
 export const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -44,6 +46,21 @@ function buildUrl(path) {
   return `${API_BASE_URL.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
 }
 
+/**
+ * Builds the `Authorization` header for a request.
+ *
+ * Read at call time rather than captured once, so a sign-in or sign-out that
+ * happens between two requests is reflected by the next one.
+ *
+ * @returns {{ Authorization?: string }} Empty when there is no token to send.
+ */
+function authHeader(enabled) {
+  if (!enabled) return {};
+
+  const token = readToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 /** Reads the body as JSON, tolerating empty and non-JSON responses. */
 async function readBody(response) {
   const text = await response.text();
@@ -58,13 +75,17 @@ async function readBody(response) {
 /**
  * Performs a request and unwraps the response envelope.
  *
+ * When a token is stored, it is sent as `Authorization: Bearer <token>`.
+ * Pass `auth: false` for the endpoints that must not carry one, or supply an
+ * explicit `Authorization` header to override it.
+ *
  * @param {string} path Path relative to the API base, e.g. `/auth/register`.
  * @param {{ method?: string, body?: unknown, signal?: AbortSignal,
- *           headers?: Record<string, string> }} [options]
+ *           auth?: boolean, headers?: Record<string, string> }} [options]
  * @returns {Promise<unknown>} The `data` field of a successful envelope.
  * @throws {ApiError} On any non-2xx response or transport failure.
  */
-export async function request(path, { method = 'GET', body, headers, signal } = {}) {
+export async function request(path, { method = 'GET', body, headers, signal, auth = true } = {}) {
   let response;
 
   try {
@@ -75,6 +96,9 @@ export async function request(path, { method = 'GET', body, headers, signal } = 
         Accept: 'application/json',
         // Only send a content type when there is actually a body to describe.
         ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...authHeader(auth),
+        // Caller-supplied headers win, so a request can override the stored
+        // credential without going around this wrapper.
         ...headers,
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
