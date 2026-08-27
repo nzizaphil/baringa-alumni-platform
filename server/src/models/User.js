@@ -5,7 +5,7 @@ import bcrypt from 'bcryptjs';
  * Work factor for bcrypt. Higher is slower to brute-force but slower to log in
  * with; 12 is the platform standard and must not be lowered.
  */
-const PASSWORD_SALT_ROUNDS = 12;
+export const PASSWORD_SALT_ROUNDS = 12;
 
 export const ROLES = ['member', 'moderator', 'administrator'];
 export const STATUSES = ['pending', 'approved', 'rejected'];

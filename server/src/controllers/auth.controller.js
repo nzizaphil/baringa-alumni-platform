@@ -1,9 +1,20 @@
 import { validationResult } from 'express-validator';
+import bcrypt from 'bcryptjs';
 
-import User from '../models/User.js';
+import User, { PASSWORD_SALT_ROUNDS } from '../models/User.js';
+import { signAuthToken } from '../config/jwt.js';
 
 // MongoDB's duplicate-key error code, raised by the unique index on `email`.
 const DUPLICATE_KEY_ERROR = 11000;
+
+/**
+ * The single message returned for every failed login.
+ *
+ * Wrong password and unknown email must be indistinguishable, so this string
+ * is used from exactly one place in `login` below and must never be
+ * specialised.
+ */
+const INVALID_CREDENTIALS_MESSAGE = 'Email or password is incorrect';
 
 /**
  * Build an error for the centralised handler in `middleware/error.middleware.js`,
@@ -89,5 +100,108 @@ export async function register(req, res, next) {
       association: user.association,
       status: user.status,
     },
+  });
+}
+
+/**
+ * The public projection of an account.
+ *
+ * Every endpoint that returns a user goes through this, so the password digest
+ * has no route to a response even if a caller selected it back in.
+ */
+export function toSafeUser(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    status: user.status,
+  };
+}
+
+/**
+ * Spend roughly the same time on an unknown email as on a wrong password.
+ *
+ * Without this, a login for an address that exists costs a bcrypt comparison
+ * and one for an address that does not returns immediately - a timing signal
+ * that answers the very question the generic 401 refuses to.
+ *
+ * The digest is built once, lazily, so importing this module stays cheap.
+ */
+let decoyPasswordHash;
+
+async function equaliseFailureCost(candidate) {
+  decoyPasswordHash ??= await bcrypt.hash(
+    'no-account-matches-this-digest',
+    PASSWORD_SALT_ROUNDS
+  );
+
+  await bcrypt.compare(typeof candidate === 'string' ? candidate : '', decoyPasswordHash);
+}
+
+/**
+ * POST /api/auth/login
+ *
+ * Exchanges credentials for a JWT access token.
+ *
+ * 200 - authenticated; returns the token and the safe user object
+ * 401 - the email is unknown or the password is wrong (indistinguishable)
+ * 422 - the submitted details failed validation
+ *
+ * Account status is carried in the token and the response rather than
+ * enforced here: blocking pending accounts is AUTH-7.
+ */
+export async function login(req, res, next) {
+  const result = validationResult(req);
+
+  if (!result.isEmpty()) {
+    return next(httpError(422, 'Validation failed', toFieldErrors(result)));
+  }
+
+  const { email, password } = req.body;
+
+  // The validator lower-cased the email, matching how the schema stored it.
+  // `passwordHash` is `select: false`, so it has to be asked for by name.
+  const user = await User.findOne({ email }).select('+passwordHash');
+
+  if (user) {
+    const passwordMatches = await user.comparePassword(password);
+
+    if (passwordMatches) {
+      const token = signAuthToken(user);
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          token,
+          user: toSafeUser(user),
+        },
+      });
+    }
+  } else {
+    await equaliseFailureCost(password);
+  }
+
+  // One exit for both failures. Keeping it to a single statement is what makes
+  // the two responses byte-identical: the error handler echoes a stack trace
+  // outside production, and a second `next(...)` site would record a different
+  // line number in it and leak which branch was taken.
+  return next(httpError(401, INVALID_CREDENTIALS_MESSAGE));
+}
+
+/**
+ * GET /api/auth/me
+ *
+ * Returns the authenticated caller's own profile. `requireAuth` has already
+ * loaded the account from the database, so this reflects any role or status
+ * change made since the token was issued.
+ *
+ * 200 - the safe user object
+ * 401 - the token was missing, malformed, expired or no longer resolves
+ */
+export async function me(req, res) {
+  return res.status(200).json({
+    success: true,
+    data: { user: toSafeUser(req.user) },
   });
 }
