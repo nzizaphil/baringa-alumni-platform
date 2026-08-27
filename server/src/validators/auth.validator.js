@@ -98,3 +98,36 @@ export const registerValidator = [
     .isLength({ max: 32 })
     .withMessage('Student number must be 32 characters or fewer'),
 ];
+
+/**
+ * Validation chain for POST /api/auth/login.
+ *
+ * Deliberately thinner than the registration chain: it only checks that
+ * something usable was submitted. Rules about password strength belong to
+ * registration - applying them here would tell an attacker which of the
+ * credentials they got wrong.
+ *
+ * The email sanitiser mirrors the schema's `lowercase: true` so the controller
+ * looks the account up with the same casing it was stored under.
+ */
+export const loginValidator = [
+  body('email')
+    .isString()
+    .withMessage('Email is required')
+    .bail()
+    .trim()
+    .notEmpty()
+    .withMessage('Email is required')
+    .bail()
+    .isEmail()
+    .withMessage('Email must be a valid email address')
+    .bail()
+    .customSanitizer((value) => value.toLowerCase()),
+
+  body('password')
+    .isString()
+    .withMessage('Password is required')
+    .bail()
+    .notEmpty()
+    .withMessage('Password is required'),
+];
