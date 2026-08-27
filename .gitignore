@@ -15,5 +15,4 @@ uploads/
 .idea/
 CLAUDE.md
 docs/prototype/
-server/seed-dev.js
-check-register.sh
+scripts/seed-dev.js

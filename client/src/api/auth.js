@@ -47,6 +47,38 @@ export const USER_STATUS = {
 };
 
 /**
+ * The `code` the server puts on a 403 from `requireApproved`, the guard every
+ * member-only route carries.
+ *
+ * These exist so a call turned away because the account is not approved yet is
+ * recognisable as exactly that, instead of arriving at a screen as an
+ * anonymous "something went wrong". Match on the code, never on the message:
+ * the message is wording for a person and the server may reword it.
+ */
+export const AUTH_ERROR_CODE = {
+  ACCOUNT_PENDING: 'ACCOUNT_PENDING',
+  ACCOUNT_REJECTED: 'ACCOUNT_REJECTED',
+};
+
+/**
+ * True when a request failed because the account may not act on the platform
+ * yet - awaiting review, or turned down.
+ *
+ * The pending screen is the one place that can answer this, so a caller that
+ * gets `true` should send the member there rather than render an error of its
+ * own. Safe to call with anything, including a non-`ApiError`.
+ *
+ * @param {unknown} error The rejection from an API call.
+ * @returns {boolean}
+ */
+export function isAccountNotApproved(error) {
+  return (
+    error?.code === AUTH_ERROR_CODE.ACCOUNT_PENDING ||
+    error?.code === AUTH_ERROR_CODE.ACCOUNT_REJECTED
+  );
+}
+
+/**
  * Exchanges credentials for an access token.
  *
  * The reply carries both the token and the account, so the caller never has to
@@ -83,4 +115,4 @@ export async function fetchCurrentUser(options) {
   return data.user;
 }
 
-export default { register, login, fetchCurrentUser };
+export default { register, login, fetchCurrentUser, isAccountNotApproved };

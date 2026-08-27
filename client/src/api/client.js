@@ -4,11 +4,13 @@
  * Every endpoint answers with the envelope documented in `server/src/app.js`:
  *
  *   success (2xx):  { success: true, data }
- *   failure (4xx+): { success: false, message, errors: [{ field, message }] }
+ *   failure (4xx+): { success: false, message, errors: [{ field, message }],
+ *                     code? }
  *
  * This module is the only place that knows about that shape. Callers receive
- * the unwrapped `data` on success, or an `ApiError` carrying the HTTP status
- * and the field-level `errors` array on failure.
+ * the unwrapped `data` on success, or an `ApiError` carrying the HTTP status,
+ * the field-level `errors` array and the failure's `code` where the server sent
+ * one.
  */
 
 import { readToken } from '../auth/tokenStorage.js';
@@ -25,13 +27,18 @@ export const NETWORK_ERROR_STATUS = 0;
  * @property {number} status HTTP status, or 0 when the request never landed.
  * @property {Array<{ field: string, message: string }>} errors Field-level
  *   details; always an array, empty when the failure was not field-specific.
+ * @property {string|null} code The server's machine-readable identifier for
+ *   this failure - `ACCOUNT_PENDING`, for instance - or null when it sent
+ *   none. Branch on this rather than on `message`, which is wording meant for
+ *   a person and may change.
  */
 export class ApiError extends Error {
-  constructor(message, { status = NETWORK_ERROR_STATUS, errors = [] } = {}) {
+  constructor(message, { status = NETWORK_ERROR_STATUS, errors = [], code = null } = {}) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.errors = Array.isArray(errors) ? errors : [];
+    this.code = typeof code === 'string' && code ? code : null;
   }
 
   /** True when the request never reached the server (offline, DNS, CORS). */
@@ -118,6 +125,7 @@ export async function request(path, { method = 'GET', body, headers, signal, aut
     throw new ApiError(payload?.message || `Request failed (${response.status}).`, {
       status: response.status,
       errors: payload?.errors,
+      code: payload?.code,
     });
   }
 
@@ -126,6 +134,7 @@ export async function request(path, { method = 'GET', body, headers, signal, aut
     throw new ApiError(payload?.message || 'The server returned an unexpected response.', {
       status: response.status,
       errors: payload?.errors,
+      code: payload?.code,
     });
   }
 
