@@ -148,8 +148,13 @@ async function equaliseFailureCost(candidate) {
  * 401 - the email is unknown or the password is wrong (indistinguishable)
  * 422 - the submitted details failed validation
  *
- * Account status is carried in the token and the response rather than
- * enforced here: blocking pending accounts is AUTH-7.
+ * Status is deliberately not enforced here (AUTH-7). A pending or rejected
+ * account is a genuine account that got its password right, so it signs in and
+ * receives a token like any other; the `status` on the returned user is what
+ * the client routes on, and `requireApproved` is what actually holds the
+ * member-only routes shut. Refusing the sign-in instead would leave an
+ * applicant with no way to see where their registration stands, and would make
+ * "not approved yet" indistinguishable from "wrong password".
  */
 export async function login(req, res, next) {
   const result = validationResult(req);
@@ -194,7 +199,11 @@ export async function login(req, res, next) {
  *
  * Returns the authenticated caller's own profile. `requireAuth` has already
  * loaded the account from the database, so this reflects any role or status
- * change made since the token was issued.
+ * change made since the token was issued - which is what lets the client see
+ * an approval land without the member signing in again.
+ *
+ * Open to every signed-in account, whatever its status: reading your own
+ * profile is not a member-only action, and the pending screen depends on it.
  *
  * 200 - the safe user object
  * 401 - the token was missing, malformed, expired or no longer resolves

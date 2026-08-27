@@ -21,6 +21,11 @@ router.post('/login', loginValidator, login);
 /**
  * GET /api/auth/me
  * Authenticated. Returns the caller's own profile.
+ *
+ * `requireAuth` only - deliberately not `requireApproved`. This is how the
+ * pending screen learns the account is still under review, so gating it on
+ * approval would lock an applicant out of the one thing they are allowed to
+ * see. Member-only routes add `requireApproved` after `requireAuth`.
  */
 router.get('/me', requireAuth, me);
 

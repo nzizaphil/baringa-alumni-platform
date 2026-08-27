@@ -155,7 +155,10 @@ export default function LoginPage() {
       /*
        * Status decides the destination. A rejected account, and anything else
        * the server may add later, falls back to the pending screen rather than
-       * into the member area - AUTH-7 owns what that screen then says.
+       * into the member area; that screen reads the status itself and says
+       * which of the two it is. `RequireAuth` applies the same rule to every
+       * later navigation, so this is a shortcut to the right screen rather
+       * than the thing enforcing it.
        */
       navigate(DESTINATION_BY_STATUS[user.status] ?? '/pending', { replace: true });
     } catch (error) {

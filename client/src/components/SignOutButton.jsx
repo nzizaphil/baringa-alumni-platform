@@ -2,6 +2,7 @@ import { useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import AuthContext from '../context/authContext.js';
+import Button from './Button.jsx';
 
 /**
  * The header's sign-out control (AUTH-5).
@@ -18,8 +19,14 @@ import AuthContext from '../context/authContext.js';
  * Reads the context directly rather than through `useAuth`, so rendering the
  * shared layout outside a provider degrades to "no control" instead of
  * throwing.
+ *
+ * @param {object} props
+ * @param {'link'|'button'} [props.variant='link'] `link` is the header
+ *   treatment. `button` is the same control drawn as a full outlined button,
+ *   for a screen that offers signing out as its own action in the page body -
+ *   the pending screen (F06.1) shows both, exactly as the prototype does.
  */
-export default function SignOutButton() {
+export default function SignOutButton({ variant = 'link' }) {
   const auth = useContext(AuthContext);
   const navigate = useNavigate();
 
@@ -30,6 +37,14 @@ export default function SignOutButton() {
     // `replace`, so Back does not return to the page they just left.
     navigate('/login', { replace: true });
   };
+
+  if (variant === 'button') {
+    return (
+      <Button variant="secondary" onClick={handleSignOut} className="px-8">
+        Sign out
+      </Button>
+    );
+  }
 
   return (
     <button
