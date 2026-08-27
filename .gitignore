@@ -13,3 +13,6 @@ uploads/
 *.key
 .vscode/
 .idea/
+CLAUDE.md
+docs/prototype/
+scripts/seed-dev.js
