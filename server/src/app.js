@@ -6,6 +6,7 @@ import healthRoutes from './routes/health.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import adminRoutes from './routes/admin.routes.js';
 import notificationRoutes from './routes/notification.routes.js';
+import postRoutes from './routes/post.routes.js';
 import { notFoundHandler, errorHandler } from './middleware/error.middleware.js';
 
 /**
@@ -43,7 +44,9 @@ import { notFoundHandler, errorHandler } from './middleware/error.middleware.js'
  * and `SELF_REVIEW_FORBIDDEN`, the 403 raised when one points the approve or
  * reject route at their own account. `controllers/notification.controller.js`
  * adds `NOTIFICATION_NOT_FOUND`, the 404 raised when a caller marks a
- * notification that is not their own as read.
+ * notification that is not their own as read, and
+ * `controllers/post.controller.js` adds `INVALID_CURSOR`, the 400 raised when a
+ * feed cursor does not decode to a position.
  *
  * Failures are produced by the centralised error handler below, so controllers
  * signal problems by throwing or calling `next(err)` with `status` / `errors` /
@@ -72,6 +75,7 @@ app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/posts', postRoutes);
 
 // Anything under /api that reached this point matched no route.
 app.use('/api', notFoundHandler);

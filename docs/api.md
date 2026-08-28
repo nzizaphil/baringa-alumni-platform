@@ -441,6 +441,118 @@ record, which would let a caller enumerate other accounts' notifications; the
 
 ---
 
+## Posts
+
+Mounted at `/api/posts` (`server/src/routes/post.routes.js`), handled by
+`server/src/controllers/post.controller.js`. Both routes carry `requireAuth`
+then `requireApproved`: writing a post and reading the feed are both acting on
+the platform, which is exactly what an account awaiting review may not do.
+
+A post carries its author as `{ id, name, role }` — never an email address. The
+feed is every approved member's view of every other member, and turning it into
+a directory of addresses is a decision for whichever ticket introduces a
+profile.
+
+### `POST /api/posts`
+
+Publishes a post by the authenticated member.
+
+**Guards** — `requireAuth`, `requireApproved`.
+
+**Body**
+
+| Field | Type | Required | Rules |
+|---|---|---|---|
+| `body` | string | yes | Trimmed; 1–2000 characters. Whitespace alone counts as empty |
+
+`authorId` is taken from the token and `visibility` is not read from the
+request: a member may write as themselves and as nobody else, and
+`members_only` is the only behaviour this phase implements. Sending either is
+not an error — both are ignored.
+
+**Success — `201`**
+
+```json
+{
+  "success": true,
+  "data": {
+    "post": {
+      "id": "6872b1e4c6d51f0014de67ab",
+      "body": "Started a new role at the university teaching hospital.",
+      "visibility": "members_only",
+      "author": {
+        "id": "6870f1c2a4b39d0012ab34cd",
+        "name": "Amina Uwase",
+        "role": "member"
+      },
+      "createdAt": "2026-01-15T22:03:07.881Z"
+    }
+  }
+}
+```
+
+**Errors**
+
+| Status | `code` | When |
+|---|---|---|
+| `422` | — | `body` was missing, empty after trimming, or over 2000 characters; `errors` names the field |
+
+### `GET /api/posts`
+
+The member feed: every post that is not hidden, newest first.
+
+**Guards** — `requireAuth`, `requireApproved`.
+
+**Query parameters**
+
+| Parameter | Type | Required | Rules |
+|---|---|---|---|
+| `limit` | integer | no | 1 to 100. Defaults to 20 |
+| `cursor` | string | no | An opaque token from a previous response's `nextCursor`. Omit for the top of the feed |
+
+Paging is by cursor rather than by page number because a feed is written to
+while it is being read: with `?page=2`, one post arriving between two requests
+shifts every row down and the reader sees the last post of page 1 again at the
+top of page 2. A cursor names a position, so a new post at the top cannot
+disturb it. Treat it as opaque — its encoding is not part of this contract.
+
+**Success — `200`**
+
+```json
+{
+  "success": true,
+  "data": {
+    "posts": [
+      {
+        "id": "6872b1e4c6d51f0014de67ab",
+        "body": "Started a new role at the university teaching hospital.",
+        "visibility": "members_only",
+        "author": {
+          "id": "6870f1c2a4b39d0012ab34cd",
+          "name": "Amina Uwase",
+          "role": "member"
+        },
+        "createdAt": "2026-01-15T22:03:07.881Z"
+      }
+    ],
+    "pagination": { "limit": 20, "hasMore": true, "nextCursor": "MjAyNi0wMS0xNVQyMjowMzowNy44ODFafDY4NzJiMWU0YzZkNTFmMDAxNGRlNjdhYg" }
+  }
+}
+```
+
+`nextCursor` is `null` on the last page, so a client can page until it is null
+rather than comparing lengths against the limit it asked for. `hidden` is not
+returned: it is a moderation flag, and every post in the feed has it false.
+
+**Errors**
+
+| Status | `code` | When |
+|---|---|---|
+| `400` | — | `limit` was supplied and is not a whole number in range |
+| `400` | `INVALID_CURSOR` | `cursor` does not decode to a position in this feed |
+
+---
+
 ## Health
 
 ### `GET /api/health`
@@ -471,6 +583,7 @@ neither the database nor the account.
 | `SELF_REVIEW_FORBIDDEN` | `403` | `approveRegistration` / `rejectRegistration` | An administrator may not decide their own registration |
 | `REGISTRATION_NOT_PENDING` | `409` | `approveRegistration` / `rejectRegistration` | This registration has already been decided |
 | `NOTIFICATION_NOT_FOUND` | `404` | `markNotificationRead` | No notification of the caller's has that id |
+| `INVALID_CURSOR` | `400` | `listFeed` | The feed cursor does not decode to a position; restart from the top |
 
 Every other failure carries `message` and `errors` only. A code earns its place
 where two failures share a status and the client has to tell them apart, as
@@ -498,3 +611,7 @@ On the client the codes are mirrored as `AUTH_ERROR_CODE`
 - **No notification types beyond `MEMBERSHIP_APPROVED`**, and no email
   delivery — the notifications above are in-app only (F14 Phase 2).
 - **No moderator-granting endpoint** (`ADMIN-5`, BAP-24, Sprint 2).
+- **No editing, deleting, reacting to or reporting a post, and no moderation**
+  (Phase 2). `visibility` and `hidden` are persisted on every post, but the only
+  behaviour built on either is the feed's exclusion of hidden posts: `public`
+  visibility has no view of its own yet, and nothing in the API sets `hidden`.
