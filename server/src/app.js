@@ -5,6 +5,7 @@ import cors from 'cors';
 import healthRoutes from './routes/health.routes.js';
 import authRoutes from './routes/auth.routes.js';
 import adminRoutes from './routes/admin.routes.js';
+import notificationRoutes from './routes/notification.routes.js';
 import { notFoundHandler, errorHandler } from './middleware/error.middleware.js';
 
 /**
@@ -40,7 +41,9 @@ import { notFoundHandler, errorHandler } from './middleware/error.middleware.js'
  * `controllers/admin.controller.js`: `REGISTRATION_NOT_PENDING`, the 409 raised
  * when an administrator decides a registration that has already been decided,
  * and `SELF_REVIEW_FORBIDDEN`, the 403 raised when one points the approve or
- * reject route at their own account.
+ * reject route at their own account. `controllers/notification.controller.js`
+ * adds `NOTIFICATION_NOT_FOUND`, the 404 raised when a caller marks a
+ * notification that is not their own as read.
  *
  * Failures are produced by the centralised error handler below, so controllers
  * signal problems by throwing or calling `next(err)` with `status` / `errors` /
@@ -68,6 +71,7 @@ app.use(
 app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/notifications', notificationRoutes);
 
 // Anything under /api that reached this point matched no route.
 app.use('/api', notFoundHandler);

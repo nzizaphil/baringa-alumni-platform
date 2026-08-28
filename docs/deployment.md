@@ -242,11 +242,10 @@ pm2 startup
 **This step runs on the instance, after the application is deployed, and the
 platform is not usable without it.** Registration only ever produces a `pending`
 member (see [Authentication and account status](auth.md)), and only an
-administrator can approve one — through
-`GET /api/admin/registrations/pending` and
-`PATCH /api/admin/registrations/:id/approve|reject`, which are themselves closed
-to anyone who is not an approved administrator (auth.md §3). So until this runs
-there is nobody who can let the first member in.
+administrator can approve one — through the registration review endpoints in
+[the API reference](api.md#admin), which are themselves closed to anyone who is
+not an approved administrator. So until this runs there is nobody who can let the
+first member in.
 
 ```bash
 cd ~/baringa-alumni-platform/server

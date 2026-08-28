@@ -93,7 +93,10 @@ registered by hand survive for the same reason.
 
 ## Documentation
 
-- [Authentication and account status](docs/auth.md) — the guards on the API, the
-  administrator endpoints that approve or reject a registration, the response
-  codes they raise, and the client routes that follow from them.
+- [API reference](docs/api.md) — every HTTP endpoint: its guards, request shape,
+  success response and failures, with the response envelope and error codes they
+  all share.
+- [Authentication and account status](docs/auth.md) — why the guards are composed
+  the way they are, the account status model, where the token lives, and the
+  client routes that follow from them.
 - [Deployment procedure](docs/deployment.md) — the manual deployment to AWS EC2.
