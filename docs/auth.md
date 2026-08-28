@@ -301,16 +301,19 @@ parameter is named either way.
 
 ### Not in these tickets
 
-Three things these two tickets deliberately stop short of:
+Two things these tickets deliberately stop short of:
 
 - **Notifying the applicant** of the outcome (F14). The decision is visible when
-  they next load the pending screen; nothing is sent to them.
-- **The administrator dashboard** that consumes these endpoints (F17, F18).
-  Until it ships, the queue is driven with `curl` as in §6.
+  they next load the pending screen; nothing is sent to them. The dashboard's
+  confirmation says so in as many words rather than repeating the prototype's
+  "the member has been notified" — see §5.
 - **Granting `moderator`** — `ADMIN-5` (BAP-24, Sprint 2), a separate endpoint on
   a separate ticket. Approving a registration is not a step towards it: an
   approved member has role `member` and stays there until an administrator
   grants the privilege.
+
+The screens that consume these endpoints (F17, F18) are the client half of the
+same two tickets and are described in §5.
 
 ---
 
@@ -339,6 +342,12 @@ notice, so **client code matches on `code`, never on `message`**.
 | `ACCOUNT_REJECTED` | 403 | `requireApproved` | The registration was reviewed and turned down |
 | `REGISTRATION_NOT_PENDING` | 409 | `approveRegistration` / `rejectRegistration` | This registration has already been decided (§3) |
 | `SELF_REVIEW_FORBIDDEN` | 403 | `approveRegistration` / `rejectRegistration` | An administrator may not decide their own registration (§3) |
+
+On the client both are exported as `ADMIN_ERROR_CODE` from
+`client/src/api/admin.js`, with `isAlreadyReviewed(error)` and
+`isSelfReview(error)` beside them — the same shape `api/auth.js` uses for the
+two account codes. The review screen branches on the first of those to tell "you
+are looking at a stale queue" apart from "the request failed"; see §5.
 
 Failures without a `code` — the 401s, `requireRole`'s 403, validation 422s, the
 400s and 404s in §3 — carry `message` and `errors` only. Each of those is
@@ -372,6 +381,8 @@ dashboard that consumes it (F18), which is the first screen able to act on it.
 | `/login` | public | `LoginPage` (F05.1) |
 | `/pending` | `RequireAuth` | `PendingApprovalPage` (F06.1) |
 | `/feed` | `RequireAuth` | `MemberFeedPage` (F07.2) |
+| `/admin` | `RequireAuth` → `AdminRoute` | `AdminDashboardPage` (F17.1 / F17.2) |
+| `/admin/registrations/:id` | `RequireAuth` → `AdminRoute` | `RegistrationReviewPage` (F18.1 / F18.4) |
 | `/` and anything unmatched | `RequireAuth` | redirect to `/feed` |
 
 Only `/register` and `/login` are public. Everything else — the root and every
@@ -382,6 +393,105 @@ who is *already* signed in back to a sign-in form; routing it through the guard
 puts an anonymous visitor at `/login`, an account awaiting review at `/pending`,
 and an approved member on the feed. The splat scores below every literal path,
 so it is consulted only when nothing else matches.
+
+
+### The administrator area
+
+`/admin` and `/admin/registrations/:id` nest a second guard inside the first.
+`AdminRoute` (`client/src/components/AdminRoute.jsx`) asks the same three
+questions the server's middleware asks, in the same order, so the client turns a
+caller away for the same reason and at the same point the API would:
+
+| Question | No → | Mirrors |
+|---|---|---|
+| Signed in? | `/login`, remembering the attempted location | `requireAuth` |
+| Approved? | `/pending` | `requireApproved` |
+| Administrator? | `/feed`, carrying an explanation | `requireRole('administrator')` |
+
+The first two duplicate `RequireAuth`, which these routes already sit behind.
+That is deliberate: a guard that only works in one arrangement is one bad merge
+away from opening the area to everybody, so `AdminRoute` fails closed on its own.
+
+**A refused member is told why.** The third answer carries a message in
+`location.state` and `MemberFeedPage` renders it, so a member who follows a link
+to `/admin` arrives at their feed with "That area is for administrators"
+explaining the trip. A silent bounce would read as a broken link, and a blank
+screen as a broken app; making the authorisation boundary visible is a
+requirement of the ticket rather than a nicety. `useFlashMessage`
+(`client/src/hooks/useFlashMessage.js`) is what carries such a message across a
+redirect and then rewrites the history entry without it, so a refresh does not
+show it a second time.
+
+**The header navigation follows the same rule.** `HeaderNav`
+(`client/src/components/HeaderNav.jsx`) draws the bar beside the wordmark and
+renders nothing at all unless the account is *approved* — a pending one is held
+at `/pending`, so offering it links it would be bounced off would be an
+invitation to a dead end, and F06.1's header is the bare wordmark and Sign out.
+For an approved account it renders **Feed** and **Profile** as F07.2 draws them,
+and adds **Dashboard** for an administrator. Hiding that third entry is
+presentation, not protection — `AdminRoute` refuses the URL whether or not a link
+to it was ever shown, and the server refuses the data regardless.
+
+Three details of that bar depart from the prototypes:
+
+- **"Dashboard", not "Registrations".** F17.1 labels it for what the screen
+  currently lists; it is named for the screen itself, which the queue is only the
+  first thing on.
+- **Every entry is purple.** The prototypes colour the current item purple and
+  the rest grey, which reads as two kinds of control rather than one bar of
+  them. All entries take the same `primary-text` as Sign out and the underline
+  alone carries "you are here".
+- **The bar is visible at every width**, where the prototypes hide it below
+  `md`. The dashboard is meant to be usable on a phone, and hiding the only way
+  to reach it there would undo that.
+
+**Profile is drawn but not linked.** The screen behind it arrives with F07.2, so
+the entry is marked `aria-disabled` rather than pointed at a `/profile` that does
+not exist — an unmatched path falls through the router's splat and lands the
+member back on the feed, which looks like a bug rather than an unbuilt screen.
+
+As with `RequireAuth`, **this guard is a convenience, not the enforcement.** It
+runs in the browser on a role the browser was told. `requireRole('administrator')`
+re-reads the account on every request, so an administrator demoted mid-session
+loses the data even while a stale tab still draws the screen.
+
+### The dashboard and the review panel
+
+`AdminDashboardPage` (F17) lists the queue oldest-first in a table that becomes
+stacked cards below 640px, since the screen is plausibly used on a phone. It
+renders exactly one of four states — loading, error with a retry, empty (F17.2),
+or the table — because an administrator shown an empty table that is really a
+failed request will close the tab believing the work is done.
+
+`RegistrationReviewPage` (F18) shows the declared details and the two decisions.
+Both open a confirmation first: the decisions are irreversible, the server
+answers 409 to a second one, and neither should be a single misclick. On success
+the screen returns to the dashboard, which reloads the queue, and the
+confirmation arrives there as a toast (F18.4) — so the administrator *sees* the
+applicant gone rather than being told they are.
+
+Three departures from the prototypes, all deliberate:
+
+- **The confirmation does not promise a notification.** F18.4 reads
+  "Registration approved — the member has been notified". Nothing is sent; F14
+  is a separate ticket. The copy says what actually happens instead, the same
+  departure decision #39 makes on the pending screen.
+- **No search or filter controls.** F17.1 draws both. The API takes `page` and
+  `limit` and nothing else, and a search box that quietly filtered one page of
+  results would be worse than none.
+- **Graduation year is its own column.** F17.1 folds it under the association as
+  "Class of 2023"; a lecturer has no class year to fold, and the ticket calls for
+  it as a column.
+
+Because there is no `GET /admin/registrations/:id` — the queue is the only read
+the API offers — the review screen finds its applicant *in* the queue. That has a
+useful consequence: an applicant who is not in the queue is one who is no longer
+pending, which is exactly the state to report when another tab got there first.
+The same reasoning covers the 409: it is shown as "this had already been
+reviewed, the queue has been refreshed" rather than as a failure, because nothing
+is broken and retrying would not help.
+
+### The member screens
 
 `/pending` sits behind the same guard as `/feed` rather than beside it, because
 `RequireAuth` (`client/src/components/RequireAuth.jsx`) routes *between* the two
@@ -473,8 +583,16 @@ until one does, the second call is made against a throwaway route mounting
 
 ### Deciding the registration
 
-Signed in as the seeded administrator (§1), the endpoints in §3 move the account
-on. `ADMIN_TOKEN` below is that administrator's token, obtained exactly as
+The quickest check is the dashboard itself: sign in as the seeded administrator
+and go to **Administrator** in the header, or straight to `/admin`. The applicant
+is in the queue; Review, then Approve, returns to the queue with them gone from
+it. Signing in as an ordinary member and asking for `/admin` bounces to the feed
+with an explanation, which is the client half of the same boundary.
+
+The `curl` walkthrough below tests the API without the UI in the way — and is
+still what to reach for when a screen and the server disagree, since it says
+which of the two is wrong. Signed in as the seeded administrator (§1), the
+endpoints in §3 move the account on. `ADMIN_TOKEN` below is that administrator's token, obtained exactly as
 `TOKEN` was above:
 
 ```bash
@@ -514,6 +632,10 @@ curl -s -X PATCH http://localhost:5000/api/admin/registrations/<own-id>/approve 
 ```bash
 cd server && npm test
 ```
+
+There is no client test runner in this release, so the administrator screens are
+verified by hand against the four states above; `npm run lint` and `npm run build`
+in `client/` are what CI checks.
 
 `server/tests/auth.approved.test.js` covers the guards, mounted on a throwaway
 route so the composition is tested rather than the middleware in isolation.

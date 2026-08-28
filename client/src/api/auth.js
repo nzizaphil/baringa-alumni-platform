@@ -47,6 +47,19 @@ export const USER_STATUS = {
 };
 
 /**
+ * Account roles.
+ *
+ * Separate from `USER_STATUS` because they answer different questions: status
+ * gates whether an account may act at all, role gates what it may do. Nothing
+ * in the client writes either - both are read from the account the API returns.
+ */
+export const USER_ROLE = {
+  MEMBER: 'member',
+  MODERATOR: 'moderator',
+  ADMINISTRATOR: 'administrator',
+};
+
+/**
  * The `code` the server puts on a 403 from `requireApproved`, the guard every
  * member-only route carries.
  *
