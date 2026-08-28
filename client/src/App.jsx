@@ -1,11 +1,14 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 
+import AdminRoute from './components/AdminRoute.jsx';
 import RequireAuth, { MEMBER_HOME_PATH } from './components/RequireAuth.jsx';
 import AuthProvider from './context/AuthProvider.jsx';
+import AdminDashboardPage from './pages/AdminDashboardPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import MemberFeedPage from './pages/MemberFeedPage.jsx';
 import PendingApprovalPage from './pages/PendingApprovalPage.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
+import RegistrationReviewPage from './pages/RegistrationReviewPage.jsx';
 
 /**
  * The route table, separate from the router so it can be mounted under a
@@ -21,6 +24,10 @@ import RegisterPage from './pages/RegisterPage.jsx';
  * is not approved is held at `/pending`, and an approved one is moved off it.
  * Adding a member screen therefore means adding it inside this block and
  * nothing else - see `RequireAuth`.
+ *
+ * The administrator screens nest a second guard inside the first, in the same
+ * order the server composes its middleware: `RequireAuth` answers "signed in,
+ * and may this account act?", `AdminRoute` answers "is it an administrator?".
  */
 export function AppRoutes() {
   return (
@@ -31,6 +38,17 @@ export function AppRoutes() {
       <Route element={<RequireAuth />}>
         <Route path="/feed" element={<MemberFeedPage />} />
         <Route path="/pending" element={<PendingApprovalPage />} />
+
+        {/*
+         * The administrator area (ADMIN-1, ADMIN-2). `AdminRoute` sends a
+         * signed-in non-administrator back to the feed with an explanation
+         * rather than rendering nothing, so a member who follows a stale link
+         * is told why they cannot be there.
+         */}
+        <Route element={<AdminRoute />}>
+          <Route path="/admin" element={<AdminDashboardPage />} />
+          <Route path="/admin/registrations/:id" element={<RegistrationReviewPage />} />
+        </Route>
 
         {/*
          * The root and anything unrecognised. Sending these to `/login`

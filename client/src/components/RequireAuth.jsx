@@ -2,13 +2,15 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom';
 
 import { USER_STATUS } from '../api/auth.js';
 import useAuth from '../hooks/useAuth.js';
+import { MEMBER_HOME_PATH, PENDING_PATH } from '../routes.js';
 import PageLayout from './PageLayout.jsx';
 
-/** Where an account that may not act yet is held. */
-export const PENDING_PATH = '/pending';
-
-/** Where an approved member belongs. */
-export const MEMBER_HOME_PATH = '/feed';
+/*
+ * Re-exported under the names this module has always used, so callers are
+ * unaffected by the paths themselves having moved to `routes.js` - where the
+ * header can reach them without importing this guard.
+ */
+export { MEMBER_HOME_PATH, PENDING_PATH };
 
 /** Ignores a trailing slash, so `/pending/` is still the pending screen. */
 function normalisePath(pathname) {
