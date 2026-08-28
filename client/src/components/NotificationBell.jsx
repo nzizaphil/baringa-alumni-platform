@@ -38,7 +38,7 @@ export default function NotificationBell() {
       to={NOTIFICATIONS_PATH}
       // h-11 keeps the target at the 44px minimum inside the 64px header.
       className={({ isActive }) =>
-        `relative inline-flex h-11 w-11 items-center justify-center rounded-button transition-colors hover:bg-bg-page focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-30 ${
+        `relative inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-button transition-colors hover:bg-bg-page focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-30 ${
           isActive ? 'text-primary-text' : 'text-primary'
         }`
       }
