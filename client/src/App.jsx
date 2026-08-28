@@ -3,9 +3,11 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import AdminRoute from './components/AdminRoute.jsx';
 import RequireAuth, { MEMBER_HOME_PATH } from './components/RequireAuth.jsx';
 import AuthProvider from './context/AuthProvider.jsx';
+import NotificationsProvider from './context/NotificationsProvider.jsx';
 import AdminDashboardPage from './pages/AdminDashboardPage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import MemberFeedPage from './pages/MemberFeedPage.jsx';
+import NotificationsPage from './pages/NotificationsPage.jsx';
 import PendingApprovalPage from './pages/PendingApprovalPage.jsx';
 import RegisterPage from './pages/RegisterPage.jsx';
 import RegistrationReviewPage from './pages/RegistrationReviewPage.jsx';
@@ -38,6 +40,14 @@ export function AppRoutes() {
       <Route element={<RequireAuth />}>
         <Route path="/feed" element={<MemberFeedPage />} />
         <Route path="/pending" element={<PendingApprovalPage />} />
+
+        {/*
+         * The member's own notifications (ADMIN-3). Inside `RequireAuth` like
+         * any other member screen: the API guards it with `requireAuth` alone,
+         * but an account still awaiting review has nothing to read here and
+         * belongs at `/pending`.
+         */}
+        <Route path="/notifications" element={<NotificationsPage />} />
 
         {/*
          * The administrator area (ADMIN-1, ADMIN-2). `AdminRoute` sends a
@@ -73,7 +83,14 @@ export default function App() {
     <BrowserRouter>
       {/* Inside the router, so the session can navigate on sign-out. */}
       <AuthProvider>
-        <AppRoutes />
+        {/*
+         * Inside the session, so it can fetch with the token and refetch when
+         * that token changes; outside the routes, so the header's unread count
+         * and the notifications screen read one copy of the list.
+         */}
+        <NotificationsProvider>
+          <AppRoutes />
+        </NotificationsProvider>
       </AuthProvider>
     </BrowserRouter>
   );

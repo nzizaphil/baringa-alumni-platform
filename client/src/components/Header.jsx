@@ -1,4 +1,5 @@
 import HeaderNav from './HeaderNav.jsx';
+import NotificationBell from './NotificationBell.jsx';
 
 /**
  * Application header, shared by every screen in the prototype.
@@ -13,6 +14,12 @@ import HeaderNav from './HeaderNav.jsx';
  * produces both prototypes' headers without any screen having to ask for one -
  * see `docs/prototype/06-BaringaAlumni - F07.2 Member F.html` and
  * `12-BaringaAlumni - F17.1 Admin Da.html`.
+ *
+ * `NotificationBell` sits at the head of the right-hand group for the same
+ * reason: it belongs to the account rather than to any one screen
+ * (`10-BaringaAlumni - F14.1 Notifica.html`), and it too draws nothing unless
+ * the account is approved. It is outside the `children` slot so a screen that
+ * replaces that slot cannot accidentally drop it.
  */
 export default function Header({ children }) {
   return (
@@ -31,7 +38,10 @@ export default function Header({ children }) {
         <HeaderNav />
       </div>
 
-      {children}
+      <div className="flex items-center gap-2">
+        <NotificationBell />
+        {children}
+      </div>
     </header>
   );
 }

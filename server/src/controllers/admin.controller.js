@@ -1,6 +1,10 @@
 import { validationResult } from 'express-validator';
 
 import User from '../models/User.js';
+import Notification, {
+  NOTIFICATION_MESSAGES,
+  NOTIFICATION_TYPES,
+} from '../models/Notification.js';
 import { toSafeUser } from './auth.controller.js';
 import { DEFAULT_PAGE_SIZE } from '../validators/admin.validator.js';
 
@@ -11,8 +15,9 @@ import { DEFAULT_PAGE_SIZE } from '../validators/admin.validator.js';
  * handlers are the only way an account moves on from that state. Every route
  * carrying them is administrator-only (see `routes/admin.routes.js`).
  *
- * Notifying the applicant, the dashboard screen and moderator privilege
- * management are separate tickets and are deliberately not touched here.
+ * Notifying the applicant in-app arrives with `ADMIN-3` and is raised from
+ * `recordDecision` below. Email delivery and moderator privilege management are
+ * separate tickets and are deliberately not touched here.
  */
 
 /**
@@ -202,6 +207,35 @@ function isSelfReview(req, id) {
 }
 
 /**
+ * Raise the in-app notification that tells a member their membership was
+ * approved (`ADMIN-3`).
+ *
+ * **Never throws.** The approval has already been written by the time this
+ * runs, and a member who is approved but not notified is in a far better place
+ * than a member left in `pending` because a second write failed - they can use
+ * the platform, and the dashboard shows them as approved. So a failure here is
+ * logged for an operator and swallowed, rather than propagated into a response
+ * that would tell the administrator their decision did not take when it did.
+ *
+ * The failure is logged with the recipient's id and nothing else: no name, no
+ * address, no message body.
+ */
+async function notifyOfApproval(recipientId) {
+  try {
+    await Notification.create({
+      recipientId,
+      type: NOTIFICATION_TYPES.MEMBERSHIP_APPROVED,
+      message: NOTIFICATION_MESSAGES[NOTIFICATION_TYPES.MEMBERSHIP_APPROVED],
+    });
+  } catch (error) {
+    console.error(
+      `Approval notification could not be created for user ${recipientId}:`,
+      error
+    );
+  }
+}
+
+/**
  * Record an administrator's decision on one registration.
  *
  * The status change is a single conditional update rather than a read, a check
@@ -244,6 +278,21 @@ async function recordDecision(req, res, next, decision) {
   );
 
   if (reviewed) {
+    /*
+     * Only an approval notifies. A rejection is a decision the applicant is
+     * told about on the pending screen; sending them a notification they
+     * cannot act on, about an account they can no longer use, is not what this
+     * ticket asks for and `MEMBERSHIP_APPROVED` would be the wrong name for it.
+     *
+     * Awaited so the notification exists before the response claims the
+     * approval is done - a member who is told "approved" and reloads
+     * immediately should not race the row into existence - but its failure
+     * cannot fail the approval. See `notifyOfApproval`.
+     */
+    if (decision === 'approved') {
+      await notifyOfApproval(reviewed._id);
+    }
+
     return res.status(200).json({
       success: true,
       data: { user: toReviewedRegistration(reviewed) },
@@ -271,6 +320,10 @@ async function recordDecision(req, res, next, decision) {
  * Approves a pending registration, letting the member act on the platform from
  * their very next request - `requireAuth` reloads the account each time, so no
  * new sign-in is needed.
+ *
+ * Also raises the member's `MEMBERSHIP_APPROVED` notification (`ADMIN-3`). If
+ * that write fails the approval still stands and still answers 200; the
+ * failure is logged rather than rolled back.
  *
  * 200 - approved; returns the account with the approver and timestamp
  * 400 - `:id` is not a valid identifier

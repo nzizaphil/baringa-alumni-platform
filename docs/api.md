@@ -319,6 +319,12 @@ from their very next request; no new sign-in is needed.
 `toSafeUser` plus the two fields that record the decision. Approving moves
 `status` and nothing else — it confers no role.
 
+Approval also raises the member's `MEMBERSHIP_APPROVED` notification (`ADMIN-3`),
+readable through [`GET /api/notifications`](#get-apinotifications). If that write
+fails the approval still stands and still answers `200`: the failure is logged,
+not rolled back, because a member who is approved but not notified is in a far
+better place than one left in `pending`. Rejection raises nothing.
+
 **Errors**
 
 | Status | `code` | When |
@@ -336,6 +342,102 @@ a decided registration is refused rather than quietly repeated.
 
 `approvedBy` and `approvedAt` are written here too — they record who reviewed
 the account and when, whichever way the decision went.
+
+---
+
+## Notifications
+
+Mounted at `/api/notifications` (`server/src/routes/notification.routes.js`),
+handled by `server/src/controllers/notification.controller.js`. Both endpoints
+carry `requireAuth` alone and are scoped to the caller: `recipientId` is part of
+the filter on every query, so neither can reach another account's records and
+neither takes a recipient parameter.
+
+`type` is an enum. `MEMBERSHIP_APPROVED` is the only value in this release; it
+is raised by [`PATCH /api/admin/registrations/:id/approve`](#patch-apiadminregistrationsidapprove).
+
+### `GET /api/notifications`
+
+The caller's own notifications, newest first, with the unread count beside them
+so a header indicator does not need a second request. Not paged: the list is
+the whole set.
+
+**Guards** — `requireAuth`. Deliberately not `requireApproved`: reading your own
+notifications is not a member-only action.
+
+**Request** — no body or parameters.
+
+**Success — `200`**
+
+```json
+{
+  "success": true,
+  "data": {
+    "notifications": [
+      {
+        "id": "6871a4d3b5c40e0013cd56ef",
+        "type": "MEMBERSHIP_APPROVED",
+        "message": "You can now post and connect with the community.",
+        "readAt": null,
+        "createdAt": "2026-01-15T22:03:07.881Z"
+      }
+    ],
+    "unreadCount": 1
+  }
+}
+```
+
+`readAt` is `null` while unread and an ISO timestamp once read. `recipientId` is
+not returned: it is always the caller's own id, which the client already knows.
+
+**Errors** — the guard failure in Conventions only (`401`).
+
+### `PATCH /api/notifications/:id/read`
+
+Marks one of the caller's own notifications as read.
+
+Idempotent: a notification that is already read answers `200` with its original
+`readAt` rather than a conflict, so two tabs marking the same row cannot turn a
+harmless race into an error.
+
+**Guards** — `requireAuth`.
+
+**Parameters**
+
+| Parameter | Type | Required | Rules |
+|---|---|---|---|
+| `:id` | path | yes | A valid MongoDB ObjectId |
+
+**Body** — none.
+
+**Success — `200`**
+
+```json
+{
+  "success": true,
+  "data": {
+    "notification": {
+      "id": "6871a4d3b5c40e0013cd56ef",
+      "type": "MEMBERSHIP_APPROVED",
+      "message": "You can now post and connect with the community.",
+      "readAt": "2026-01-16T08:41:22.104Z",
+      "createdAt": "2026-01-15T22:03:07.881Z"
+    }
+  }
+}
+```
+
+**Errors**
+
+| Status | `code` | When |
+|---|---|---|
+| `400` | — | `:id` is not a valid identifier |
+| `404` | `NOTIFICATION_NOT_FOUND` | No notification *of the caller's* has that id |
+
+An id belonging to another account answers `404`, not `403`, and byte-identically
+to an id that exists nowhere. A `403` would confirm that the id names a real
+record, which would let a caller enumerate other accounts' notifications; the
+`404` says only "you have no such notification", which is true either way.
 
 ---
 
@@ -368,6 +470,7 @@ neither the database nor the account.
 | `ACCOUNT_REJECTED` | `403` | `requireApproved` | The registration was reviewed and turned down |
 | `SELF_REVIEW_FORBIDDEN` | `403` | `approveRegistration` / `rejectRegistration` | An administrator may not decide their own registration |
 | `REGISTRATION_NOT_PENDING` | `409` | `approveRegistration` / `rejectRegistration` | This registration has already been decided |
+| `NOTIFICATION_NOT_FOUND` | `404` | `markNotificationRead` | No notification of the caller's has that id |
 
 Every other failure carries `message` and `errors` only. A code earns its place
 where two failures share a status and the client has to tell them apart, as
@@ -376,8 +479,10 @@ differently — `REGISTRATION_NOT_PENDING` means "somebody else has already
 handled this, refresh the queue" rather than "something went wrong".
 
 On the client the codes are mirrored as `AUTH_ERROR_CODE`
-(`client/src/api/auth.js`, with `isAccountNotApproved`) and `ADMIN_ERROR_CODE`
-(`client/src/api/admin.js`, with `isAlreadyReviewed` and `isSelfReview`).
+(`client/src/api/auth.js`, with `isAccountNotApproved`), `ADMIN_ERROR_CODE`
+(`client/src/api/admin.js`, with `isAlreadyReviewed` and `isSelfReview`) and
+`NOTIFICATION_ERROR_CODE` (`client/src/api/notifications.js`, with
+`isNotificationMissing`).
 `ApiError.code` (`client/src/api/client.js`) is where the value arrives.
 
 ---
@@ -390,5 +495,6 @@ On the client the codes are mirrored as `AUTH_ERROR_CODE`
   report when another tab got there first.
 - **No endpoint writes `role`, and none creates an administrator.** The first
   administrator is seeded out of band; see [auth.md](auth.md#where-the-first-administrator-comes-from).
-- **No notification endpoint** (F14) and **no moderator-granting endpoint**
-  (`ADMIN-5`, BAP-24, Sprint 2).
+- **No notification types beyond `MEMBERSHIP_APPROVED`**, and no email
+  delivery — the notifications above are in-app only (F14 Phase 2).
+- **No moderator-granting endpoint** (`ADMIN-5`, BAP-24, Sprint 2).

@@ -15,6 +15,9 @@ export const MEMBER_HOME_PATH = '/feed';
 /** Where an account that may not act yet is held (F06.1). */
 export const PENDING_PATH = '/pending';
 
+/** The member's own notifications (F14). */
+export const NOTIFICATIONS_PATH = '/notifications';
+
 /** The administrator area's home: the pending-registration queue (F17). */
 export const ADMIN_HOME_PATH = '/admin';
 
