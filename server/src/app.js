@@ -4,6 +4,7 @@ import cors from 'cors';
 
 import healthRoutes from './routes/health.routes.js';
 import authRoutes from './routes/auth.routes.js';
+import adminRoutes from './routes/admin.routes.js';
 import { notFoundHandler, errorHandler } from './middleware/error.middleware.js';
 
 /**
@@ -35,7 +36,11 @@ import { notFoundHandler, errorHandler } from './middleware/error.middleware.js'
  * SCREAMING_SNAKE identifier; the `message` beside it is the wording shown to a
  * person and may be reworded without notice. The codes defined so far are
  * `ACCOUNT_PENDING` and `ACCOUNT_REJECTED`, both 403s raised by
- * `requireApproved` (see `middleware/auth.middleware.js`).
+ * `requireApproved` (see `middleware/auth.middleware.js`), and two from
+ * `controllers/admin.controller.js`: `REGISTRATION_NOT_PENDING`, the 409 raised
+ * when an administrator decides a registration that has already been decided,
+ * and `SELF_REVIEW_FORBIDDEN`, the 403 raised when one points the approve or
+ * reject route at their own account.
  *
  * Failures are produced by the centralised error handler below, so controllers
  * signal problems by throwing or calling `next(err)` with `status` / `errors` /
@@ -62,6 +67,7 @@ app.use(
 
 app.use('/api/health', healthRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Anything under /api that reached this point matched no route.
 app.use('/api', notFoundHandler);
