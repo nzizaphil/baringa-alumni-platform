@@ -27,18 +27,31 @@ export default function Header({ children }) {
       id="header"
       className="sticky top-0 z-50 flex h-16 w-full items-center justify-between border-b border-border-light bg-white px-6 md:px-12"
     >
-      <div className="flex items-center gap-4 md:gap-8">
-        <div className="flex items-center gap-2">
+      {/*
+        * `min-w-0` is what lets this group be squeezed rather than pushing the
+        * account controls off the right edge: without it a flex child refuses
+        * to shrink below its content, and at 320px the header overflowed the
+        * page by 65px.
+        */}
+      <div className="flex min-w-0 items-center gap-4 md:gap-8">
+        <div className="flex shrink-0 items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
             <i className="fa-solid fa-graduation-cap text-lg text-white" aria-hidden="true" />
           </div>
-          <span className="text-20 font-semibold text-near-black">Baringa Alumni</span>
+          {/* The wordmark gives way to the mark alone on the narrowest phones,
+              where those 120px are the difference between the navigation
+              fitting and the header scrolling sideways. */}
+          <span className="hidden text-20 font-semibold text-near-black sm:inline">
+            Baringa Alumni
+          </span>
         </div>
 
         <HeaderNav />
       </div>
 
-      <div className="flex items-center gap-2">
+      {/* Never shrinks: sign-out and the unread count are the two things that
+          must stay reachable at every width. */}
+      <div className="flex shrink-0 items-center gap-2">
         <NotificationBell />
         {children}
       </div>

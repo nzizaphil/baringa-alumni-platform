@@ -34,7 +34,9 @@ import { ADMIN_HOME_PATH, MEMBER_HOME_PATH } from '../routes.js';
  * the underline alone carries "you are here".
  */
 const LINK_BASE =
-  'inline-flex h-16 items-center border-b-2 px-1 text-14 font-semibold text-primary-text transition-colors';
+  // px-2 rather than px-1: at 375px the shortest label ("Feed") is 41px wide with
+  // px-1, three short of the 44px minimum touch target.
+  'inline-flex h-16 shrink-0 items-center border-b-2 px-2 text-14 font-semibold text-primary-text transition-colors';
 
 const LINK_STATE = {
   // py-5 equivalent: the underline sits on the header's own bottom border.
@@ -58,7 +60,16 @@ export default function HeaderNav() {
      * The dashboard is explicitly meant to be usable on a phone, and hiding the
      * only way to reach it there would undo that; the gap tightens instead.
      */
-    <nav aria-label="Main" className="flex items-center gap-4 md:gap-6">
+    <nav
+      aria-label="Main"
+      /*
+       * `min-w-0` plus `overflow-x-auto` keeps a crowded bar - an
+       * administrator sees three entries, not two - inside the header instead
+       * of widening the page. The bar scrolls within itself on the narrowest
+       * screens; the page never does.
+       */
+      className="flex min-w-0 items-center gap-4 overflow-x-auto md:gap-6"
+    >
       {isAdministrator && (
         <NavLink to={ADMIN_HOME_PATH} className={className}>
           Dashboard

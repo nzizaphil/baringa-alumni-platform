@@ -32,6 +32,14 @@
  *   the right of the label, on the same line. The login screen's "Forgot
  *   password?" affordance sits there in the prototype. Omitting it leaves the
  *   label exactly as before.
+ * @param {boolean} [props.multiline=false] Renders a `textarea` instead of an
+ *   `input`, for the post composer (F08). Everything around the control - the
+ *   bound label, the helper, the error and the `aria-*` wiring - is identical,
+ *   which is the whole reason the composer reuses this rather than rebuilding
+ *   it: a form control that announces itself differently depending on which
+ *   screen drew it is a bug waiting to happen. Only the control's own metrics
+ *   change, since a textarea is sized by rows rather than by height.
+ * @param {number} [props.rows=6] Rows, when `multiline`.
  */
 export default function FormField({
   id,
@@ -44,6 +52,8 @@ export default function FormField({
   disabled = false,
   inputRef,
   labelAdornment,
+  multiline = false,
+  rows = 6,
   className = '',
   ...inputProps
 }) {
@@ -59,13 +69,29 @@ export default function FormField({
     .join(' ');
 
   const inputClasses = [
-    'w-full h-11 px-4 rounded-input text-16 transition-all',
+    'w-full rounded-input text-16 transition-all',
+    // A textarea is sized by its rows and needs vertical padding of its own;
+    // an input keeps the 44px height every other field in the app has.
+    multiline ? 'px-4 py-3 resize-none' : 'h-11 px-4',
     'focus:outline-none focus:ring-2 focus:ring-primary focus:ring-opacity-20',
     isInvalid ? 'border-2 border-danger' : 'border border-border-light',
     disabled
       ? 'bg-bg-page text-secondary-text cursor-not-allowed'
       : 'bg-white text-near-black',
   ].join(' ');
+
+  // One set of props for either control, so the two cannot drift apart.
+  const controlProps = {
+    id,
+    ref: inputRef,
+    className: inputClasses,
+    required,
+    disabled,
+    'aria-disabled': disabled || undefined,
+    'aria-invalid': isInvalid ? true : undefined,
+    'aria-describedby': describedBy || undefined,
+    ...inputProps,
+  };
 
   return (
     <div className={['space-y-2', className].filter(Boolean).join(' ')}>
@@ -90,18 +116,11 @@ export default function FormField({
         {labelAdornment}
       </div>
 
-      <input
-        id={id}
-        type={type}
-        ref={inputRef}
-        className={inputClasses}
-        required={required}
-        disabled={disabled}
-        aria-disabled={disabled || undefined}
-        aria-invalid={isInvalid ? true : undefined}
-        aria-describedby={describedBy || undefined}
-        {...inputProps}
-      />
+      {multiline ? (
+        <textarea rows={rows} {...controlProps} />
+      ) : (
+        <input type={type} {...controlProps} />
+      )}
 
       {helperText && (
         <p className="text-12 text-secondary-text" id={helperId}>
