@@ -226,3 +226,92 @@ describe('password storage', () => {
     expect(await user.comparePassword('WrongPassword1')).toBe(false);
   });
 });
+
+/**
+ * Registration against an address a *privileged* account already holds.
+ *
+ * The lookup in the controller is role-agnostic on purpose, so these collide on
+ * the same branch as any other duplicate. What is being pinned here is that the
+ * public answer is indistinguishable from a member collision: a registration
+ * form that answered differently for an administrator's address would let an
+ * unauthenticated visitor enumerate the privileged accounts by trying addresses
+ * until the wording changed.
+ *
+ * The seed script (`ADMIN-6`) is allowed to name the role in its refusal - it is
+ * run by an administrator on the server, not by a visitor.
+ */
+describe('POST /api/auth/register against a privileged email', () => {
+  /** Registration never produces these, so they are created directly. */
+  const createPrivilegedAccount = (role) =>
+    new User({
+      name: 'Baringa Registrar',
+      email: VALID_REGISTRATION.email,
+      // The pre-save hook replaces this plaintext with its bcrypt digest.
+      passwordHash: 'Baringa2026',
+      role,
+      status: 'approved',
+      association: 'current_lecturer',
+    }).save();
+
+  /**
+   * Registers against an address already held by `holder`, from a clean
+   * database each time so the three responses are produced under identical
+   * conditions and can be compared byte for byte.
+   */
+  async function collisionResponse(holder) {
+    await clearMemoryDatabase();
+
+    if (holder === 'member') {
+      await registerRequest();
+    } else {
+      await createPrivilegedAccount(holder);
+    }
+
+    return registerRequest({ name: 'Someone Else' });
+  }
+
+  it('rejects registration against an administrator email with 409', async () => {
+    const response = await collisionResponse('administrator');
+
+    // Not a 500: the duplicate is caught by the lookup, not by the unique index
+    // surfacing as an unhandled MongoServerError.
+    expect(response.status).toBe(409);
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toMatch(/already exists/i);
+
+    // The administrator is untouched and no second account was written.
+    expect(await User.countDocuments()).toBe(1);
+    expect((await User.findOne({ email: VALID_REGISTRATION.email })).role).toBe('administrator');
+  });
+
+  it('rejects registration against a moderator email with 409', async () => {
+    const response = await collisionResponse('moderator');
+
+    expect(response.status).toBe(409);
+    expect(response.body.success).toBe(false);
+    expect(response.body.message).toMatch(/already exists/i);
+    expect(await User.countDocuments()).toBe(1);
+    expect((await User.findOne({ email: VALID_REGISTRATION.email })).role).toBe('moderator');
+  });
+
+  it('answers byte-identically whichever role holds the address', async () => {
+    const member = await collisionResponse('member');
+    const administrator = await collisionResponse('administrator');
+    const moderator = await collisionResponse('moderator');
+
+    // Raw text, not the parsed body: this is what actually reaches the visitor,
+    // and it is compared whole so a future field cannot leak the role either.
+    expect(administrator.text).toBe(member.text);
+    expect(moderator.text).toBe(member.text);
+    expect(administrator.status).toBe(member.status);
+    expect(moderator.status).toBe(member.status);
+  });
+
+  it('never names the role that holds the address', async () => {
+    for (const holder of ['administrator', 'moderator']) {
+      const response = await collisionResponse(holder);
+
+      expect(response.text).not.toMatch(/administrator|moderator|privileged/i);
+    }
+  });
+});

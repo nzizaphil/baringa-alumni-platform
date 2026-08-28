@@ -75,13 +75,14 @@ Both are scoped to specific single IP addresses rather than `0.0.0.0/0`. No wild
 - `.env.example` in the repository root lists the required variable names with no values.
 - The production `.env` exists only on the instance, created by hand at deployment time.
 - The production `JWT_SECRET` is different from the development one, so that a compromise of one environment does not grant access to the other.
+- The first administrator's credential is supplied the same way, through `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` in the instance's `.env`. The seeding script (§7.5) has no default and no fallback value in its source, so there is no administrator password to commit and none to forget to change. `ADMIN_PASSWORD` is never printed by the script, in success or in failure.
 - The application logs a database connection confirmation but never logs the connection string, credentials or tokens.
 
 ### Verification
 
 ```bash
 # no secrets anywhere in committed history
-git log -p --all | grep -iE "mongodb\+srv://|JWT_SECRET=.+|BEGIN RSA"
+git log -p --all | grep -iE "mongodb\+srv://|JWT_SECRET=.+|ADMIN_PASSWORD=.+|BEGIN RSA"
 ```
 
 Expected: no output other than `.env.example` placeholders.
@@ -201,13 +202,24 @@ MONGODB_URI=mongodb+srv://<user>:<password>@<cluster-host>/baringa?retryWrites=t
 JWT_SECRET=<64-character random hex string>
 JWT_EXPIRES_IN=1d
 CLIENT_URL=http://13.211.174.154
+ADMIN_EMAIL=<the first administrator's email address>
+ADMIN_PASSWORD=<a strong password, chosen here and nowhere else>
+ADMIN_NAME=<the first administrator's display name>
 ```
+
+The three `ADMIN_` values are read by the seeding script in §7.5 and by nothing
+else — the running application never reads them. They are listed as empty keys in
+`.env.example`, which is the only place in the repository they appear.
 
 Generate the JWT secret on the instance:
 
 ```bash
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 ```
+
+`ADMIN_PASSWORD` should be at least as strong as the platform asks of a member at
+registration — eight characters or more, with a letter and a digit — since it
+opens the most privileged account on the system.
 
 ### 4. Start under PM2
 
@@ -225,6 +237,50 @@ pm2 startup
 > ```
 > Confirm the log line reads `Server listening on port 5000 (production)`. This matters because the centralised error handler only suppresses stack traces when `NODE_ENV` is `production`.
 
+### 5. Seed the first administrator
+
+**This step runs on the instance, after the application is deployed, and the
+platform is not usable without it.** Registration only ever produces a `pending`
+member (see [Authentication and account status](auth.md)), and only an
+administrator can approve one — so until this runs there is nobody who can let
+the first member in.
+
+```bash
+cd ~/baringa-alumni-platform/server
+npm run seed:admin
+```
+
+It reads `ADMIN_EMAIL`, `ADMIN_PASSWORD` and `ADMIN_NAME` from the `.env` created
+in §7.3 and creates one account with role `administrator`, status `approved` and
+association `current_lecturer`. Expected output:
+
+```
+MongoDB connected: database "baringa"
+Administrator created: <ADMIN_EMAIL> ("<ADMIN_NAME>")
+```
+
+If a variable is missing the script stops before connecting, names the variables
+that are not set, and exits non-zero:
+
+```
+Cannot seed an administrator: ADMIN_PASSWORD is not set
+```
+
+There is deliberately no API endpoint that creates an administrator, and there
+must never be one: the first privileged account has to come from somewhere the
+API cannot be talked into reaching. This script is that somewhere.
+
+**Re-running is safe.** If the account is already there it is reported and left
+exactly as it is — no duplicate, and no password reset even if `ADMIN_PASSWORD`
+has since been changed in the `.env`:
+
+```
+Administrator already exists: <ADMIN_EMAIL> - left unchanged
+```
+
+Changing a live administrator's password is therefore not something this script
+does; it only ever creates the first one.
+
 ---
 
 ## 8. Verification
@@ -241,6 +297,10 @@ curl http://localhost/api/health
 
 # logs show a clean start and no credentials
 pm2 logs baringa-api --lines 20
+
+# exactly one administrator exists, and it is approved
+cd ~/baringa-alumni-platform
+node --env-file=server/.env scripts/db-query.js '{"role":"administrator"}'
 ```
 
 Expected log output:
@@ -296,6 +356,11 @@ pm2 logs baringa-api --lines 20
 ```
 
 The `--update-env` flag is included as standard so that any change to `.env` is picked up rather than silently ignored.
+
+`npm run seed:admin` (§7.5) does not need repeating on an update — the account
+survives a redeployment, since it lives in the database rather than on the
+instance. Running it again is harmless if you are unsure: it reports the existing
+account and changes nothing.
 
 ---
 
