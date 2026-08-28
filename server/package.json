@@ -11,6 +11,7 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "seed:admin": "node src/scripts/seedAdmin.js",
+    "seed:dev": "node src/scripts/seedDevData.js",
     "test": "vitest run"
   },
   "keywords": [],

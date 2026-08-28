@@ -1,7 +1,8 @@
 # Authentication and account status
 
 *Baringa University Alumni Platform — how an account proves who it is, and what it is allowed to do*
-*Jira: `AUTH-1` (registration), `AUTH-4` (sign-in), `AUTH-7` (pending-registrant block)*
+*Jira: `AUTH-1` (registration), `AUTH-4` (sign-in), `AUTH-7` (pending-registrant block),*
+*`ADMIN-1` (registration queue), `ADMIN-2` (approve/reject)*
 
 Registration is open to anyone. Acting on the platform is not: an administrator
 validates each applicant against university records first. This document is the
@@ -24,7 +25,8 @@ real state — the account is privileged but not yet validated — and it must b
 barred like any other pending account.
 
 Registration always produces `role: member` / `status: pending`. Only an
-administrator moves an account on from there (`ADMIN-*`).
+administrator moves an account on from there, through the three endpoints in
+§3. Nothing else in the API writes `status`, and nothing at all writes `role`.
 
 ### Where the first administrator comes from
 
@@ -42,8 +44,14 @@ It reads `ADMIN_EMAIL`, `ADMIN_PASSWORD` and `ADMIN_NAME` from the environment
 and nothing else — no default, no fallback, so no administrator credential
 exists in the repository to be committed — and creates one account with role
 `administrator`, status `approved` and association `current_lecturer`. It is
-idempotent: an account that is already there is reported and left untouched,
-which is what makes it safe for deployment to run every time.
+idempotent: an administrator that is already there is reported and left
+untouched, which is what makes it safe for deployment to run every time.
+
+It also **refuses to promote an existing account**. If `ADMIN_EMAIL` names an
+address already held by a member or a moderator, the script stops and says so
+rather than raising that account's role. Promoting on the strength of a value in
+a `.env` would be privilege escalation through a config file, and it would put a
+member-to-administrator path back into the system by the back door.
 
 This bootstraps the chain. Until it runs, every account on the platform is a
 `pending` member and there is nobody who can approve one. The full procedure,
@@ -68,9 +76,14 @@ right on a route:
 router.get('/posts', requireAuth, requireApproved, listPosts);
 
 // An administrator-only route: status is still checked first
-router.get('/registrations', requireAuth, requireApproved,
-           requireRole('administrator'), listRegistrations);
+router.get('/registrations/pending', requireAuth, requireApproved,
+           requireRole('administrator'), listPendingRegistrations);
 ```
+
+`requireApproved` stays in the middle on an administrator route, and the review
+routes in §3 are no exception. A pending administrator is a real state — the
+account is privileged but has not itself been validated — so leaving the guard
+out would let one approve their own registration by approving everybody's.
 
 **A route is member-only exactly when it carries `requireApproved`.** Adding a
 member feature means adding those two guards and nothing else; there is no
@@ -100,7 +113,208 @@ what the token cannot get past.
 
 ---
 
-## 3. Response codes
+## 3. The administrator review endpoints
+
+Mounted at `/api/admin` (`server/src/routes/admin.routes.js`), handled by
+`server/src/controllers/admin.controller.js`. These three are the only way an
+account leaves `pending`.
+
+| Endpoint | Ticket | Does |
+|---|---|---|
+| `GET /api/admin/registrations/pending` | `ADMIN-1` | The review queue, oldest first |
+| `PATCH /api/admin/registrations/:id/approve` | `ADMIN-2` | Sets `status: approved` |
+| `PATCH /api/admin/registrations/:id/reject` | `ADMIN-2` | Sets `status: rejected` |
+
+`PATCH` rather than `POST` or `DELETE`: both decisions change one field on an
+account that already exists, and neither creates or removes anything.
+
+### Authorisation
+
+All three carry the same guards in the same order — `requireAuth`,
+`requireApproved`, `requireRole('administrator')` — so the failures stack in
+that order too:
+
+| Caller | Answer |
+|---|---|
+| No token, or one that is expired, malformed or no longer resolves | 401, no `code` |
+| Signed in, account `pending` or `rejected` | 403 `ACCOUNT_PENDING` / `ACCOUNT_REJECTED` |
+| Signed in and approved, role `member` or `moderator` | 403, no `code` |
+| Signed in, approved, role `administrator`, `:id` is their own account | 403 `SELF_REVIEW_FORBIDDEN` |
+| Signed in, approved, role `administrator` | Through |
+
+A moderator is turned away exactly like a member: moderation privileges are not
+review privileges, and nothing in this release grants a moderator a way in here.
+The presence or absence of `code` on the 403 is what separates "your account may
+not act yet" from "your account may act, but not on this" — see §4.
+
+### The queue
+
+```
+GET /api/admin/registrations/pending?page=1&limit=20
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "registrations": [
+      {
+        "id": "6870f1c2a4b39d0012ab34cd",
+        "name": "Amina Uwase",
+        "email": "amina.uwase@example.com",
+        "association": "former_student",
+        "studentNumber": "n10428837",
+        "graduationYear": 2019,
+        "registeredAt": "2026-01-14T09:12:44.310Z"
+      }
+    ],
+    "pagination": { "page": 1, "limit": 20, "total": 1, "totalPages": 1 }
+  }
+}
+```
+
+Only `status: pending` accounts appear; an account drops out of the queue the
+moment it is decided. **Ordering is `createdAt` ascending** — the longest wait is
+at the top, so nobody is pushed down the list by a steady arrival of newer
+registrations.
+
+This projection is wider than `toSafeUser` on purpose. An administrator is
+deciding whether this person is who they say they are, so the queue carries the
+details the applicant declared at registration — association, student number,
+graduation year — which `/api/auth/login` and `/api/auth/me` do not return. It is built
+from a named field list rather than an exclusion, so a column added to the
+schema later cannot start appearing here by accident, and the password digest
+has no route into it at all.
+
+`page` defaults to 1 and `limit` to 20, capped at 100 so a hand-written
+`?limit=100000` cannot ask for the whole members collection in one request.
+Both are optional; supplying one that is not a whole number in range is a 400
+rather than a silent reset, so a client paging with a bad cursor hears about it.
+`total` counts the entire queue rather than the page, which is what lets the
+dashboard say "20 of 340 awaiting review" without a second request.
+
+### A decision
+
+```
+PATCH /api/admin/registrations/6870f1c2a4b39d0012ab34cd/approve
+```
+
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": "6870f1c2a4b39d0012ab34cd",
+      "name": "Amina Uwase",
+      "email": "amina.uwase@example.com",
+      "role": "member",
+      "status": "approved",
+      "approvedBy": "6870e0aa1f2b4c0011990022",
+      "approvedAt": "2026-01-15T22:03:07.881Z"
+    }
+  }
+}
+```
+
+The account is `toSafeUser` plus the two fields that record the decision, so the
+account contract stays single-sourced and the response still says who acted and
+when. `approvedBy` is the acting administrator's id and is written **for a
+rejection too**: the field records who reviewed the account, whichever way the
+decision went.
+
+Approving moves `status` and nothing else — `pending` to `approved`, which is
+what makes an applicant a member. **It confers no role.** No endpoint in the API
+writes `role` today, and no endpoint ever creates an administrator: that account
+comes only from the seeding script in §1, run outside the application. `ADMIN-5`
+(BAP-24, Sprint 2) adds the one thing that does write the field — an
+administrator granting `moderator` to an existing member — which is a privilege
+laid on a member account, not a new kind of account, and still nothing an
+account can ask for on its own behalf.
+
+The member does not have to sign in again. `requireAuth` reloads the account on
+every request, so a decision takes effect on their very next one.
+
+### Nobody decides their own registration
+
+An administrator that points `approve` or `reject` at their own id is refused
+with **403 `SELF_REVIEW_FORBIDDEN`**, before the database is touched.
+
+The guards make self-approval unreachable already, twice over: `requireApproved`
+runs before `requireRole`, so an administrator who is still `pending` never
+reaches the controller, and one who is already `approved` has nothing left to
+approve and would get the 409 below. Both of those are *consequences* of other
+rules rather than the rule itself, and the first stops holding the moment
+somebody reorders the guard chain. The check is therefore made inside the
+operation, where it holds regardless of what sits above it.
+
+Rejection is covered too. The escalation risk is all on the approve side, but
+"no administrator decides their own registration" is worth being able to state
+without an exception.
+
+Ids are compared as ObjectIds, not as strings. MongoDB reads hex
+case-insensitively, so an upper-cased `:id` addresses the very same document
+while comparing unequal as text — a string check would wave it straight through.
+
+This is the last of the layers keeping privilege out of the API's reach. Nothing
+here creates an administrator (§1), nothing here writes `role`, and now nothing
+here lets the one account that *can* decide registrations decide its own.
+
+### Deciding twice is refused
+
+An account that is no longer `pending` answers **409 `REGISTRATION_NOT_PENDING`**
+— to a second approval, and to a rejection after an approval alike. Repeating
+the decision silently would be worse than refusing it: it would overwrite the
+first administrator's `approvedBy` and `approvedAt`, erasing who actually made
+the call, and it would tell the second administrator nothing about why the
+applicant they were looking at had already gone from their queue.
+
+The update is one conditional write — `{ _id, status: 'pending' }` — rather than
+a read, a check and a write, so two administrators pressing Approve at the same
+moment cannot both succeed. Exactly one matches; the other matches nothing, and
+only then is a second read made to say whether the id is unknown (404) or the
+registration has already been decided (409).
+
+### Response codes
+
+| Status | When | `code` |
+|---|---|---|
+| 200 | Listed, approved or rejected | — |
+| 400 | `:id` is not a valid ObjectId, or `page` / `limit` is not a usable number | — |
+| 401 | Not signed in | — |
+| 403 | Signed in, but not an approved administrator | `ACCOUNT_PENDING` / `ACCOUNT_REJECTED`, or none |
+| 403 | An administrator pointing the route at their own account | `SELF_REVIEW_FORBIDDEN` |
+| 404 | No account has that id | — |
+| 409 | The registration has already been decided | `REGISTRATION_NOT_PENDING` |
+
+`:id` is checked against `mongoose.isValidObjectId` before it reaches the
+database (`server/src/validators/admin.validator.js`). Without that, a malformed
+id raises a Mongoose `CastError` deep inside the update, which arrives at the
+centralised handler with no `status` and is reported as a 500 — a server fault,
+for what is the caller's malformed URL.
+
+The 400 is deliberately not the 422 the registration and login forms answer
+with. 422 says "the form you submitted was understood and its contents were
+wrong", which is what puts field-level messages beside inputs; this is a request
+the server could not make sense of in the first place, and there is no form
+behind it to annotate. The `errors` array is still populated, so the offending
+parameter is named either way.
+
+### Not in these tickets
+
+Three things these two tickets deliberately stop short of:
+
+- **Notifying the applicant** of the outcome (F14). The decision is visible when
+  they next load the pending screen; nothing is sent to them.
+- **The administrator dashboard** that consumes these endpoints (F17, F18).
+  Until it ships, the queue is driven with `curl` as in §6.
+- **Granting `moderator`** — `ADMIN-5` (BAP-24, Sprint 2), a separate endpoint on
+  a separate ticket. Approving a registration is not a step towards it: an
+  approved member has role `member` and stays there until an administrator
+  grants the privilege.
+
+---
+
+## 4. Response codes
 
 The failure envelope (see `server/src/app.js`) carries an optional `code`
 alongside `message`:
@@ -123,9 +337,16 @@ notice, so **client code matches on `code`, never on `message`**.
 |---|---|---|---|
 | `ACCOUNT_PENDING` | 403 | `requireApproved` | The registration has not been reviewed yet |
 | `ACCOUNT_REJECTED` | 403 | `requireApproved` | The registration was reviewed and turned down |
+| `REGISTRATION_NOT_PENDING` | 409 | `approveRegistration` / `rejectRegistration` | This registration has already been decided (§3) |
+| `SELF_REVIEW_FORBIDDEN` | 403 | `approveRegistration` / `rejectRegistration` | An administrator may not decide their own registration (§3) |
 
-Failures without a `code` — the 401s, `requireRole`'s 403, validation 422s — are
-unchanged and still carry `message` and `errors`.
+Failures without a `code` — the 401s, `requireRole`'s 403, validation 422s, the
+400s and 404s in §3 — carry `message` and `errors` only. Each of those is
+unambiguous from its status and the route it came back from; a code earns its
+place only where two failures share a status and the client has to tell them
+apart, as `requireApproved`'s two 403s do, or where the client is expected to
+act differently — a `REGISTRATION_NOT_PENDING` means "somebody else has already
+handled this, refresh the queue" rather than "something went wrong".
 
 To emit one, attach `errorCode` to the error the centralised handler receives.
 The property is `errorCode` rather than `code` because `code` is already taken on
@@ -135,13 +356,15 @@ part of this API's contract.
 
 On the client, `ApiError` exposes the value as `error.code`
 (`client/src/api/client.js`), and `client/src/api/auth.js` exports the two
-constants as `AUTH_ERROR_CODE` together with `isAccountNotApproved(error)`. A
-member-only call turned away for this reason is therefore recognisable as
+account constants as `AUTH_ERROR_CODE` together with `isAccountNotApproved(error)`.
+A member-only call turned away for this reason is therefore recognisable as
 exactly that, rather than surfacing as a generic "something went wrong".
+`REGISTRATION_NOT_PENDING` has no client constant yet; it gets one with the
+dashboard that consumes it (F18), which is the first screen able to act on it.
 
 ---
 
-## 4. Client routes
+## 5. Client routes
 
 | Path | Guard | Screen |
 |---|---|---|
@@ -226,7 +449,7 @@ and would leave them refreshing forever.
 
 ---
 
-## 5. Verifying the block
+## 6. Verifying the block
 
 With the API running (`cd server && npm run dev`) and a pending account
 registered:
@@ -248,15 +471,55 @@ No member-only route ships yet — posts and the feed are later tickets — so
 until one does, the second call is made against a throwaway route mounting
 `requireAuth, requireApproved` against the same database.
 
-Setting the account to `approved` in the database opens the second call on the
-next request with no new sign-in; setting it to `rejected` returns the same 403
-with `"code":"ACCOUNT_REJECTED"`. `scripts/db-query.js` lists accounts and their
-statuses read-only.
+### Deciding the registration
 
-The same cases are covered by `server/tests/auth.approved.test.js`, which mounts
-the guards on a throwaway route so the composition is tested rather than the
-middleware in isolation:
+Signed in as the seeded administrator (§1), the endpoints in §3 move the account
+on. `ADMIN_TOKEN` below is that administrator's token, obtained exactly as
+`TOKEN` was above:
+
+```bash
+# the queue, oldest first: the applicant is in it
+curl -s http://localhost:5000/api/admin/registrations/pending \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# approve them (take the id from the queue above)
+curl -s -X PATCH http://localhost:5000/api/admin/registrations/<id>/approve \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+
+# again: 409 with "code":"REGISTRATION_NOT_PENDING"
+curl -s -X PATCH http://localhost:5000/api/admin/registrations/<id>/approve \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+The approval opens the member-only call on the applicant's **next** request with
+no new sign-in — their `$TOKEN` from above still works and still claims
+"pending", and the account is re-read per request. Rejecting instead returns the
+same 403 as before with `"code":"ACCOUNT_REJECTED"`. Repeating the queue call
+shows the account gone from it either way. `scripts/db-query.js` lists accounts
+and their statuses read-only.
+
+Repeating any of the three calls with the applicant's `$TOKEN` rather than
+`$ADMIN_TOKEN` answers 403, and with no token at all, 401.
+
+The administrator pointing either decision at their **own** id answers 403 with
+`"code":"SELF_REVIEW_FORBIDDEN"`, upper-cased hex included:
+
+```bash
+curl -s -X PATCH http://localhost:5000/api/admin/registrations/<own-id>/approve \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+### Automated coverage
 
 ```bash
 cd server && npm test
 ```
+
+`server/tests/auth.approved.test.js` covers the guards, mounted on a throwaway
+route so the composition is tested rather than the middleware in isolation.
+`server/tests/admin.approval.test.js` covers the review endpoints against the
+real app: the queue's contents and ordering, its paging, approval recording the
+approver and timestamp, the 409 on a second decision, the 404 and 400 on a
+missing and a malformed id, the refusal of self-review in both directions and
+in either hex casing, and the 401/403 for every caller who may not be there —
+including an administrator who has not been approved themselves.
