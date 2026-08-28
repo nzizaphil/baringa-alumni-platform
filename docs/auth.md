@@ -26,6 +26,30 @@ barred like any other pending account.
 Registration always produces `role: member` / `status: pending`. Only an
 administrator moves an account on from there (`ADMIN-*`).
 
+### Where the first administrator comes from
+
+Nothing in the API creates an administrator, and nothing in it ever should: an
+endpoint that mints privilege is an endpoint that can be talked into minting it
+for the wrong person. The first administrator is seeded out of band by
+`server/src/scripts/seedAdmin.js` (`ADMIN-6`), run on the instance after
+deployment:
+
+```bash
+cd server && npm run seed:admin
+```
+
+It reads `ADMIN_EMAIL`, `ADMIN_PASSWORD` and `ADMIN_NAME` from the environment
+and nothing else — no default, no fallback, so no administrator credential
+exists in the repository to be committed — and creates one account with role
+`administrator`, status `approved` and association `current_lecturer`. It is
+idempotent: an account that is already there is reported and left untouched,
+which is what makes it safe for deployment to run every time.
+
+This bootstraps the chain. Until it runs, every account on the platform is a
+`pending` member and there is nobody who can approve one. The full procedure,
+including where the three variables are set, is in
+[the deployment procedure](deployment.md) §7.5.
+
 ---
 
 ## 2. The guards
