@@ -47,10 +47,29 @@ Nginx (reverse proxy)
   │  proxy_pass → localhost:5000
   ▼
 Node.js / Express (managed by PM2, process name "baringa-api")
-  │  Mongoose
-  ▼
-MongoDB Atlas (database "baringa")
+  ├── /api/*  → routers → Mongoose → MongoDB Atlas (database "baringa")
+  └── everything else → the built React client in client/dist
 ```
+
+**Express serves the built client as well as the API.** There is one process and
+one port: Nginx forwards everything to `localhost:5000` and does not need to know
+where the build output lives. In `client/dist`, requests naming a real build file
+are answered with that file, and every other `GET` outside `/api` is answered with
+`client/dist/index.html`, so React Router resolves the URL in the browser and a
+refresh on a client route such as `/feed` returns the application rather than a
+404. Unknown `/api` paths are untouched by this and still return the JSON 404
+envelope.
+
+This behaviour is gated on `NODE_ENV=production` (see §7.3). In development the
+client is served by Vite on port 5173, which proxies `/api` to port 5000, so the
+Express process serves the API only.
+
+> **Consequence for deployment: `client/dist` must exist on the instance.** It is
+> build output and is not in the repository, so `git pull` never creates or
+> updates it — `npm run build` in `client/` does, and it must be run before PM2
+> is started or restarted (§7.4, §9). If the build is missing, the application
+> still starts and the API still works, but every client route returns 404 and
+> the log carries `Client build not found at ... - serving the API only.`
 
 Only port 80 is exposed. The application listens on `localhost:5000` and is not directly reachable from outside the instance. This keeps the inbound surface to two ports (22 for administration, 80 for the application), satisfying NFR4.
 
@@ -187,6 +206,19 @@ cd server
 npm install
 ```
 
+### 2b. Build the client
+
+The Express process serves the compiled client (§2), and the compiled client is
+not in the repository. Build it before starting PM2, or the deployed site will
+answer `/api` correctly and every page route with a 404.
+
+```bash
+cd ~/baringa-alumni-platform/client
+npm install
+npm run build          # writes client/dist, which Express serves
+ls dist/index.html     # must exist before §7.4
+```
+
 ### 3. Create the production environment file
 
 ```bash
@@ -223,7 +255,12 @@ opens the most privileged account on the system.
 
 ### 4. Start under PM2
 
+Confirm §7.2b has been run and `client/dist/index.html` exists first — the static
+handler is wired up when the process starts, so a build produced afterwards is not
+picked up until the next restart.
+
 ```bash
+cd ~/baringa-alumni-platform/server
 pm2 start src/server.js --name baringa-api
 pm2 save
 pm2 startup
@@ -297,6 +334,13 @@ curl http://localhost:5000/api/health
 # application responds through Nginx
 curl http://localhost/api/health
 
+# an unknown API path returns the JSON 404 envelope, not the HTML shell
+curl -i http://localhost/api/does-not-exist
+
+# the built client is served, and a refresh on a client route survives
+curl -i http://localhost/
+curl -i http://localhost/feed
+
 # logs show a clean start and no credentials
 pm2 logs baringa-api --lines 20
 
@@ -318,7 +362,14 @@ Expected health response:
 {"success":true,"data":{"status":"ok","timestamp":"..."}}
 ```
 
-From a browser on a whitelisted address: `http://13.211.174.154/api/health` returns the same payload.
+Expected for the three client checks: `/api/does-not-exist` returns
+`404` with `Content-Type: application/json` and
+`{"success":false,"message":"Route not found: GET /api/does-not-exist","errors":[]}`,
+while `/` and `/feed` both return `200` with `Content-Type: text/html` and the
+same `index.html`. If `/feed` returns `404`, the client has not been built on the
+instance or PM2 was started before it was — run §7.2b and restart.
+
+From a browser on a whitelisted address: `http://13.211.174.154/api/health` returns the same payload, and `http://13.211.174.154/feed` loads the application directly and survives a refresh.
 
 ### Reboot persistence test
 
@@ -350,12 +401,19 @@ npm install                      # only if dependencies changed
 
 cd ../client
 npm install                      # only if dependencies changed
-npm run build                    # produces client/dist, served by Express
+npm run build                    # REQUIRED before the restart below
 
 cd ../server
 pm2 restart baringa-api --update-env
 pm2 logs baringa-api --lines 20
 ```
+
+**`npm run build` in `client/` is not optional and is not conditional.** Express
+serves `client/dist` (§2), and `git pull` does not update it because build output
+is not committed. Skipping the build leaves the previous bundle in place and the
+site silently serves the old client against the new API; there is no error to
+notice. Run the build before `pm2 restart` — the static handler is wired up at
+process start, so building afterwards changes nothing until the next restart.
 
 The `--update-env` flag is included as standard so that any change to `.env` is picked up rather than silently ignored.
 
