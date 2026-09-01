@@ -17,8 +17,8 @@ CI/CD is out of scope for this phase per the assessment brief. Deployment is man
 | Region | ap-southeast-2 (Sydney) |
 | Instance type | t3.medium |
 | Operating system | Ubuntu Server 24.04 LTS |
-| Public IPv4 | `13.211.174.154` |
-| Public URL | `http://13.211.174.154` |
+| Public IPv4 | `3.106.192.200` |
+| Public URL | `http://3.106.192.200` |
 | Storage | 23 GB root volume |
 | Subnet | `subnet-01b6baa7effb222fc` (aws-controltower-PublicSubnet1) |
 | Instance profile | `IFN636-EC2-Role` |
@@ -97,6 +97,76 @@ Both are scoped to specific single IP addresses rather than `0.0.0.0/0`. No wild
 - The first administrator's credential is supplied the same way, through `ADMIN_EMAIL` / `ADMIN_PASSWORD` / `ADMIN_NAME` in the instance's `.env`. The seeding script (§7.5) has no default and no fallback value in its source, so there is no administrator password to commit and none to forget to change. `ADMIN_PASSWORD` is never printed by the script, in success or in failure.
 - The application logs a database connection confirmation but never logs the connection string, credentials or tokens.
 
+### SSH access
+
+The instance key is issued by AWS in PuTTY `.ppk` format. OpenSSH clients, including the WSL terminal and the VS Code Remote-SSH extension, cannot read that format and must be given a converted copy.
+
+```bash
+sudo apt install -y putty-tools
+mkdir -p ~/.ssh
+puttygen /path/to/Interface_key.ppk -O private-openssh -o ~/.ssh/baringa-key.pem
+chmod 400 ~/.ssh/baringa-key.pem
+```
+
+`chmod 400` is required — OpenSSH refuses a key readable by any other account.
+
+Add a host entry to `~/.ssh/config` so the address is recorded in one place and connecting does not require retyping it:
+
+```text
+Host baringa
+    HostName 3.106.192.200
+    User ubuntu
+    IdentityFile ~/.ssh/baringa-key.pem
+    ServerAliveInterval 60
+```
+
+Then `ssh baringa` connects. `ServerAliveInterval` prevents the session dropping while output is being read.
+
+For editing files on the instance directly, the VS Code **Remote - SSH** extension uses this same configuration. If VS Code runs on Windows rather than inside WSL it reads `C:\Users\<user>\.ssh\config` instead, needs its own copy of the `.pem`, and requires the file's inherited permissions to be removed:
+
+```powershell
+icacls C:\Users\<user>\.ssh\baringa-key.pem /inheritance:r /grant:r "$($env:USERNAME):(R)"
+```
+
+**When the instance address changes, `~/.ssh/config` must be updated too**, or every connection attempt times out with no indication of the cause.
+
+### Credential rotation
+
+Any credential that has been exposed — pasted into a chat, captured in a screenshot, or committed in error — is treated as compromised and rotated, even where the exposure appears low risk.
+
+**MongoDB application user.** Atlas → **Database Access** → edit `baringa_app` → **Edit Password** → **Autogenerate**. Update `MONGODB_URI` in the local `server/.env`, then on the instance:
+
+```bash
+ssh baringa
+cd ~/baringa-alumni-platform/server
+nano .env
+pm2 restart baringa-api --update-env
+pm2 logs baringa-api --lines 20
+```
+
+Both environments must be updated. A running application holds its existing connection, so rotating the password without updating the instance appears to work — and then fails at the next restart, when the cause is no longer obvious.
+
+Verify a connection string before restarting, so a wrong value does not take the application down:
+
+```bash
+cd ~/baringa-alumni-platform/server
+node --env-file=.env -e "
+const m=require('mongoose');
+m.connect(process.env.MONGODB_URI).then(async()=>{
+  console.log('connected to', m.connection.name); await m.disconnect();
+}).catch(e=>{console.error('FAILED:', e.message); process.exit(1);});"
+```
+
+**JWT secret.** Regenerate on the instance and restart as above. Every issued token is invalidated and all users are signed out — expected, and acceptable outside a live demonstration.
+
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
+
+Development and production secrets are generated separately and never shared between environments.
+
+**Administrator password.** `npm run seed:admin` is idempotent and will not modify an existing account, so changing `ADMIN_PASSWORD` in `.env` after seeding has no effect. Rotating it requires deleting the administrator record and re-running the seed.
+
 ### Verification
 
 ```bash
@@ -172,7 +242,7 @@ sudo systemctl restart nginx
 sudo systemctl enable nginx    # start on boot
 ```
 
-**Checkpoint.** Browsing to `http://13.211.174.154` should now return **502 Bad Gateway**. This is the correct result at this stage: Nginx is running and forwarding, but nothing is yet listening on port 5000.
+**Checkpoint.** Browsing to `http://3.106.192.200` should now return **502 Bad Gateway**. This is the correct result at this stage: Nginx is running and forwarding, but nothing is yet listening on port 5000.
 
 ---
 
@@ -182,7 +252,7 @@ Performed in the MongoDB Atlas console.
 
 1. Cluster `IFN636Taskmgr` (free M0 tier, ap-southeast-2).
 2. **Database Access** — create user `baringa_app` with an autogenerated password and the *Read and write to any database* role. A dedicated user is used for this application rather than reusing an existing one, so its credentials can be rotated independently.
-3. **Network Access** — add the instance's public IP `13.211.174.154` to the access list. Without this the deployed application cannot reach the database.
+3. **Network Access** — add the instance's public IP `3.106.192.200` to the access list. Without this the deployed application cannot reach the database.
 4. **Connect → Drivers → Node.js** — copy the connection string.
 
 The database name `baringa` is appended to the connection string before the query parameters, which isolates this application's data from other databases on the same cluster:
@@ -233,7 +303,7 @@ PORT=5000
 MONGODB_URI=mongodb+srv://<user>:<password>@<cluster-host>/baringa?retryWrites=true&w=majority
 JWT_SECRET=<64-character random hex string>
 JWT_EXPIRES_IN=1d
-CLIENT_URL=http://13.211.174.154
+CLIENT_URL=http://3.106.192.200
 ADMIN_EMAIL=<the first administrator's email address>
 ADMIN_PASSWORD=<a strong password, chosen here and nowhere else>
 ADMIN_NAME=<the first administrator's display name>
@@ -369,7 +439,7 @@ while `/` and `/feed` both return `200` with `Content-Type: text/html` and the
 same `index.html`. If `/feed` returns `404`, the client has not been built on the
 instance or PM2 was started before it was — run §7.2b and restart.
 
-From a browser on a whitelisted address: `http://13.211.174.154/api/health` returns the same payload, and `http://13.211.174.154/feed` loads the application directly and survives a refresh.
+From a browser on a whitelisted address: `http://3.106.192.200/api/health` returns the same payload, and `http://3.106.192.200/feed` loads the application directly and survives a refresh.
 
 ### Reboot persistence test
 
@@ -426,7 +496,41 @@ account and changes nothing.
 
 ## 10. Known constraints
 
-**No Elastic IP.** Elastic IP allocation is not available in the managed QUT AWS account, so the instance uses an auto-assigned public IP. An auto-assigned address is retained for the life of a running instance but is released on stop. **The instance is therefore left running for the duration of the assessment and must not be stopped**, as stopping it would change the public URL and invalidate every reference to it — the report cover page, the README, the Atlas access list and `CLIENT_URL`.
+**No Elastic IP.** Elastic IP allocation is not available in the managed QUT AWS account, so the instance uses an auto-assigned public IP. An auto-assigned address is retained for the life of a running instance but is released on stop. **The instance is therefore left running for the duration of the assessment and must not be stopped**, as stopping it changes the public URL and invalidates every reference to it.
+
+This is not hypothetical. The instance was stopped once during development and the address changed from `13.211.174.154` to `3.106.192.200`. The recovery procedure below records what had to be updated, in the order the failures appear.
+
+### Recovering from an address change
+
+Read the current address from the EC2 console — the instance is identified by its ID, `i-0b915c1f99ca7ba2d`, not by its address. Then update every reference:
+
+| # | What | Where | Symptom if missed |
+|---|---|---|---|
+| 1 | SSH host entry | `~/.ssh/config` on the developer machine | `ssh` times out with no error explaining why |
+| 2 | Atlas access list | Atlas → **Network Access** — add the new address, remove the old | Application starts but every database operation fails |
+| 3 | `CLIENT_URL` | instance `server/.env`, then `pm2 restart baringa-api --update-env` | CORS rejections against the old origin |
+| 4 | Inbound security group rules | AWS console, if any rule referenced the instance | Not applicable to inbound rules, but check any outbound allowlist elsewhere |
+| 5 | Deployment URL | `README.md`, report cover page, submission | Marker follows a dead link |
+| 6 | This document | §1 target environment and every command example | Future deployment follows stale instructions |
+
+Confirm the recovery:
+
+```bash
+ssh baringa
+pm2 list                                                   # baringa-api online
+curl -s -o /dev/null -w "%{http_code}\n" localhost:5000/api/health
+```
+
+Then from a whitelisted machine, not from the instance:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" http://<new-address>/api/health
+curl -s -o /dev/null -w "%{http_code}\n" http://<new-address>/feed
+```
+
+Both must return `200`. The second confirms the client build is being served and that a client-side route survives a direct request.
+
+**Check the address again immediately before submission and before any demonstration.** A URL recorded hours earlier may no longer resolve.
 
 **Per-IP inbound access.** The shared security groups permit port 80 only from specific `/32` addresses. Access for any additional user requires adding their address to the inbound rules.
 

@@ -83,6 +83,31 @@ Composed left to right on a route (`server/src/middleware/auth.middleware.js`):
 absence of `code` on a 403 is what separates "your account may not act yet"
 from "your account may act, but not on this".
 
+### Paths outside `/api`
+
+In production (`NODE_ENV=production`) the server also serves the built client.
+`express.static` answers any request naming a real file in `client/dist`, and any
+remaining **GET** falls through to `client/dist/index.html` so that a client-side
+route survives a direct request or a refresh.
+
+This is scoped deliberately, and the ordering in `server/src/app.js` is what keeps
+the API contract intact:
+
+- The static handler and the fallback are registered **after** every `/api` route,
+  so they can never shadow one.
+- The fallback **excludes `/api`**, so an unknown API path still answers with the
+  JSON 404 envelope rather than the HTML shell — a client parsing a failed call
+  gets JSON, not a page.
+- Only **GET** is answered. A `POST` to an unknown path is a 404, not an
+  `index.html` body.
+
+Outside production the fallback is not registered at all: Vite serves the client
+on port 5173 and proxies `/api` to the API, so the two never overlap.
+
+The practical consequence for anyone testing the deployed application: `GET /feed`
+returns `200` and HTML, while `GET /api/feed` returns `404` and JSON. Both are
+correct.
+
 ### Failures common to every endpoint
 
 | Status | `code` | When |
@@ -90,7 +115,7 @@ from "your account may act, but not on this".
 | `401` | — | `requireAuth`: token missing, malformed, expired, wrongly signed, or pointing at an account that no longer exists |
 | `403` | `ACCOUNT_PENDING` / `ACCOUNT_REJECTED` | `requireApproved`: the account is `pending` or `rejected` |
 | `403` | — | `requireRole`: the account's role is not permitted here |
-| `404` | — | No route matched. `message` is `Route not found: <METHOD> <URL>` |
+| `404` | — | No route matched. `message` is `Route not found: <METHOD> <URL>`. In production this applies to `/api` paths; other GET paths are answered by the client fallback above |
 | `413` | — | Request body over 100 kB |
 | `500` | — | Unhandled server fault |
 
